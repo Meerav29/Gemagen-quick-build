@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
-import { GameConfig, BuildType, Player } from '../types'
+import { useState, useEffect } from 'react'
+import { BuildType, Player } from '../types'
+import { CaptureMode, CameraLayout, GameConfigExtended } from '../types-extended'
 
 interface SetupScreenProps {
-  onStart: (config: GameConfig) => void
+  onStart: (config: GameConfigExtended) => void
 }
 
 const CHALLENGE_PRESETS = {
@@ -70,6 +71,24 @@ function ArrowRightIcon({ className = 'w-4 h-4' }: { className?: string }) {
   )
 }
 
+function CameraIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M2 7.5A1.5 1.5 0 013.5 6h.879a1.5 1.5 0 001.06-.44l.622-.621A1.5 1.5 0 017.12 4.5h5.758a1.5 1.5 0 011.06.44l.622.62A1.5 1.5 0 0015.62 6h.879A1.5 1.5 0 0118 7.5v7A1.5 1.5 0 0116.5 16h-13A1.5 1.5 0 012 14.5v-7z" strokeLinejoin="round" />
+      <circle cx="10" cy="11" r="2.5" />
+    </svg>
+  )
+}
+
+function UploadIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M10 13V4m0 0L7 7m3-3l3 3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 14v2a1 1 0 001 1h12a1 1 0 001-1v-2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export default function SetupScreen({ onStart }: SetupScreenProps) {
   const [buildType, setBuildType] = useState<BuildType>('lego')
   const [challenge, setChallenge] = useState('')
@@ -78,31 +97,132 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
   const [playerNames, setPlayerNames] = useState(['', '', '', ''])
   const [playerCount, setPlayerCount] = useState(3)
 
+  // Capture mode state
+  const [captureMode, setCaptureMode] = useState<CaptureMode>('upload')
+  const [cameraLayout, setCameraLayout] = useState<CameraLayout>('shared')
+  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
+  const [cameraAssignments, setCameraAssignments] = useState<Record<number, string>>({})
+  const [cameraError, setCameraError] = useState<string | null>(null)
+  const [camerasLoading, setCamerasLoading] = useState(false)
+
+  // Enumerate cameras when mode switches to camera
+  useEffect(() => {
+    if (captureMode !== 'camera') return
+
+    // Check API availability (requires HTTPS in production)
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices) {
+      setCameraError('Camera mode requires a secure connection (HTTPS).')
+      return
+    }
+
+    let tempStream: MediaStream | null = null
+
+    const enumerate = async () => {
+      setCamerasLoading(true)
+      setCameraError(null)
+      try {
+        // Request brief permission so labels are populated
+        tempStream = await navigator.mediaDevices.getUserMedia({ video: true })
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        const cameras = devices.filter(d => d.kind === 'videoinput')
+        if (cameras.length === 0) {
+          setCameraError('No cameras detected. Connect a camera and try again.')
+        } else {
+          setAvailableCameras(cameras)
+        }
+      } catch (err: unknown) {
+        const domErr = err as DOMException
+        if (domErr.name === 'NotAllowedError' || domErr.name === 'PermissionDeniedError') {
+          setCameraError('Camera permission denied. Allow camera access and try again.')
+        } else {
+          setCameraError('Could not access cameras. Check your browser settings.')
+        }
+      } finally {
+        // Stop the temporary permission stream immediately
+        tempStream?.getTracks().forEach(t => t.stop())
+        setCamerasLoading(false)
+      }
+    }
+
+    enumerate()
+  }, [captureMode])
+
+  const handleCaptureModeChange = (mode: CaptureMode) => {
+    setCaptureMode(mode)
+    setCameraError(null)
+    setCameraAssignments({})
+    if (mode === 'upload') setAvailableCameras([])
+  }
+
+  const handlePlayerCountChange = (n: number) => {
+    setPlayerCount(n)
+    setCameraAssignments(prev => {
+      const next: Record<number, string> = {}
+      for (let i = 0; i < n; i++) {
+        if (prev[i]) next[i] = prev[i]
+      }
+      return next
+    })
+  }
+
   const activePlayers = playerNames.slice(0, playerCount)
   const allNamed = activePlayers.every(n => n.trim().length > 0)
   const selectedChallenge = challenge === 'custom' ? customChallenge : challenge
-  const canStart = allNamed && selectedChallenge.trim().length > 0
+
+  // In shared mode: just need at least one camera detected.
+  // In per-player mode: every player slot must have a camera selected, no duplicates.
+  const allCamerasAssigned = captureMode === 'upload'
+    || cameraLayout === 'shared'
+      ? availableCameras.length > 0
+      : (activePlayers.every((_, i) => !!cameraAssignments[i]) && availableCameras.length > 0)
+
+  const hasDuplicateCameras = captureMode === 'camera' && cameraLayout === 'per-player' && (() => {
+    const assigned = activePlayers.map((_, i) => cameraAssignments[i]).filter(Boolean)
+    return assigned.length !== new Set(assigned).size
+  })()
+
+  const canStart = allNamed && selectedChallenge.trim().length > 0 && allCamerasAssigned && !hasDuplicateCameras && !cameraError
 
   const handleStart = () => {
     const players: Player[] = activePlayers.map((name, i) => ({
-      id: `player-${i}`,
+      id: `player-${i}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       name: name.trim(),
       photoDataUrl: null,
       photoBase64: null,
     }))
-    onStart({ players, buildType, challenge: selectedChallenge.trim(), timerSeconds })
+
+    let cameraAssignmentsList: { playerId: string; deviceId: string }[] = []
+    if (captureMode === 'camera') {
+      if (cameraLayout === 'shared') {
+        // All players share the first/only camera
+        const sharedDeviceId = availableCameras[0]?.deviceId ?? ''
+        cameraAssignmentsList = players.map(p => ({ playerId: p.id, deviceId: sharedDeviceId }))
+      } else {
+        cameraAssignmentsList = players.map((p, i) => ({ playerId: p.id, deviceId: cameraAssignments[i] }))
+      }
+    }
+
+    onStart({
+      players,
+      buildType,
+      challenge: selectedChallenge.trim(),
+      timerSeconds,
+      captureMode,
+      cameraLayout,
+      cameraAssignments: cameraAssignmentsList,
+    })
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6 py-12 bg-[#F8FAFC]">
+    <div className="min-h-screen flex flex-col items-center justify-start sm:justify-center px-6 py-8 sm:py-12 bg-[#F8FAFC]">
       <div className="w-full max-w-2xl">
 
         {/* Header */}
-        <div className="text-center mb-10">
+        <div className="text-center mb-6 sm:mb-10">
           <div className="inline-flex items-center gap-2 px-3 py-1 text-xs font-medium text-[#1B3A6B] bg-[#EEF3FB] border border-[#C7D9F0] rounded-full mb-5">
             IST 130 · AI &amp; Art
           </div>
-          <h1 className="font-display text-6xl md:text-7xl font-bold text-[#0F172A] tracking-tight leading-none mb-3">
+          <h1 className="font-display text-5xl sm:text-6xl md:text-7xl font-bold text-[#0F172A] tracking-tight leading-none mb-3">
             Quick<br /><span className="text-[#1B3A6B]">Build</span>
           </h1>
           <p className="text-[#64748B] text-sm">
@@ -198,6 +318,114 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
             </div>
           </div>
 
+          {/* Capture Mode */}
+          <div className="card p-5">
+            <label className="flex items-center gap-2 text-xs font-semibold text-[#64748B] uppercase tracking-wider mb-3">
+              <CameraIcon /> Capture Mode
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => handleCaptureModeChange('upload')}
+                className={`py-3 px-4 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all ${
+                  captureMode === 'upload' ? 'bg-[#1B3A6B] text-white shadow-sm' : 'btn-ghost'
+                }`}
+              >
+                <UploadIcon /> Player Upload
+              </button>
+              <button
+                onClick={() => handleCaptureModeChange('camera')}
+                className={`py-3 px-4 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all ${
+                  captureMode === 'camera' ? 'bg-[#1B3A6B] text-white shadow-sm' : 'btn-ghost'
+                }`}
+              >
+                <CameraIcon /> Live Camera
+              </button>
+            </div>
+
+            {captureMode === 'camera' && camerasLoading && (
+              <p className="mt-3 text-xs text-[#64748B]">Detecting cameras…</p>
+            )}
+
+            {captureMode === 'camera' && cameraError && (
+              <div className="mt-3 flex items-start gap-2 bg-[#FFFBEB] border border-[#FDE68A] rounded-lg px-3 py-2.5">
+                <svg className="w-4 h-4 text-[#D97706] flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495z" strokeLinejoin="round" />
+                  <line x1="10" y1="8" x2="10" y2="11" strokeLinecap="round" />
+                  <circle cx="10" cy="14" r="0.5" fill="currentColor" />
+                </svg>
+                <div className="flex-1">
+                  <p className="text-xs text-[#92400E]">{cameraError}</p>
+                  <button
+                    onClick={() => handleCaptureModeChange('upload')}
+                    className="text-xs text-[#1B3A6B] underline mt-1"
+                  >
+                    Switch to Player Upload
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {captureMode === 'camera' && !cameraError && !camerasLoading && availableCameras.length > 0 && (
+              <div className="mt-3 space-y-3">
+                {/* Shared vs per-player sub-toggle */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => { setCameraLayout('shared'); setCameraAssignments({}) }}
+                    className={`py-2 px-3 rounded-lg text-xs font-medium transition-all ${
+                      cameraLayout === 'shared' ? 'bg-[#1B3A6B] text-white' : 'btn-ghost'
+                    }`}
+                  >
+                    One shared camera
+                  </button>
+                  <button
+                    onClick={() => setCameraLayout('per-player')}
+                    className={`py-2 px-3 rounded-lg text-xs font-medium transition-all ${
+                      cameraLayout === 'per-player' ? 'bg-[#1B3A6B] text-white' : 'btn-ghost'
+                    }`}
+                  >
+                    One per player
+                  </button>
+                </div>
+
+                {cameraLayout === 'shared' && (
+                  <p className="text-xs text-[#64748B]">
+                    {availableCameras.length} camera{availableCameras.length !== 1 ? 's' : ''} detected. All players will share the same view.
+                  </p>
+                )}
+
+                {cameraLayout === 'per-player' && (
+                  <div className="space-y-2">
+                    {activePlayers.map((name, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-[#64748B] w-20 truncate">{name || `Player ${i + 1}`}</span>
+                        <select
+                          value={cameraAssignments[i] ?? ''}
+                          onChange={e => setCameraAssignments(prev => ({ ...prev, [i]: e.target.value }))}
+                          className={`flex-1 bg-white border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[#1B3A6B] transition-colors ${
+                            hasDuplicateCameras && cameraAssignments[i] &&
+                            Object.entries(cameraAssignments).some(([k, v]) => Number(k) !== i && v === cameraAssignments[i])
+                              ? 'border-[#DC2626] text-[#DC2626]'
+                              : 'border-[#E2E8F0] text-[#0F172A]'
+                          }`}
+                        >
+                          <option value="">Select camera…</option>
+                          {availableCameras.map((cam, ci) => (
+                            <option key={cam.deviceId} value={cam.deviceId}>
+                              {cam.label || `Camera ${ci + 1}`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                    {hasDuplicateCameras && (
+                      <p className="text-xs text-[#DC2626]">Each player must have a different camera.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Players */}
           <div className="card p-5">
             <div className="flex items-center justify-between mb-3">
@@ -208,7 +436,7 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
                 {[2, 3, 4].map(n => (
                   <button
                     key={n}
-                    onClick={() => setPlayerCount(n)}
+                    onClick={() => handlePlayerCountChange(n)}
                     className={`w-8 h-8 text-sm rounded-lg transition-all font-medium ${
                       playerCount === n ? 'bg-[#1B3A6B] text-white' : 'btn-ghost'
                     }`}

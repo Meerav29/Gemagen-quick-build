@@ -1,17 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const VERTEX_API_KEY = process.env.VERTEX_API_KEY
+const VERTEX_MODEL = process.env.VERTEX_MODEL ?? 'gemini-2.5-flash'
+const VERTEX_URL = `https://aiplatform.googleapis.com/v1/publishers/google/models/${VERTEX_MODEL}:generateContent?key=${VERTEX_API_KEY}`
 
 export async function POST(req: NextRequest) {
   try {
     const { players, challenge, buildType } = await req.json()
 
-    const content: Anthropic.MessageParam['content'] = []
-
     const buildDesc = buildType === 'lego' ? 'LEGO brick sculpture' : 'drawing'
 
-    const prompt = `You are the head judge of a high-stakes quick build contest.
+    const activePlayers = players.filter((p: { photoBase64: string | null }) => p.photoBase64)
+
+    const playerScoreSchema = activePlayers.map((_: unknown, i: number) => {
+      const p = activePlayers[i]
+      return `"player_${i + 1}": { "playerName": "${p.name}", "playerNumber": ${i + 1}, "score": number(1-10), "scoringReasoning": string, "colorScore": number(1-10), "structureScore": number(1-10), "adherenceScore": number(1-10), "detailScore": number(1-10) }`
+    }).join(', ')
+
+    const promptText = `You are the head judge of a high-stakes quick build contest.
 Players had limited time to build "${challenge}" as a ${buildDesc}.
 
 Evaluate each player's build on a scale of 1–10 across these criteria:
@@ -28,33 +34,22 @@ Also write a dramatic "winnerAnnouncementScript" (3–5 sentences) that:
 - Keeps the winner ambiguous until the VERY LAST WORD
 - Ends with: "...and the winner is... [NAME]!"
 
-Here are the builds to judge:\n`
+Here are the builds to judge:`
 
-    content.push({ type: 'text', text: prompt })
-
-    const activePlayers = players.filter((p: { photoBase64: string | null }) => p.photoBase64)
+    const parts: unknown[] = [{ text: promptText }]
 
     for (let i = 0; i < activePlayers.length; i++) {
       const player = activePlayers[i]
-      content.push({ type: 'text', text: `Player ${i + 1}: ${player.name}` })
-      content.push({
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: 'image/jpeg',
+      parts.push({ text: `Player ${i + 1}: ${player.name}` })
+      parts.push({
+        inlineData: {
+          mimeType: 'image/jpeg',
           data: player.photoBase64,
         }
       })
     }
 
-    // Build dynamic schema description
-    const playerScoreSchema = activePlayers.map((_: unknown, i: number) => {
-      const p = activePlayers[i]
-      return `"player_${i + 1}": { "playerName": "${p.name}", "playerNumber": ${i + 1}, "score": number(1-10), "scoringReasoning": string, "colorScore": number(1-10), "structureScore": number(1-10), "adherenceScore": number(1-10), "detailScore": number(1-10) }`
-    }).join(', ')
-
-    content.push({
-      type: 'text',
+    parts.push({
       text: `Respond ONLY with a JSON object matching this exact shape (no markdown):
 {
   "scores": { ${playerScoreSchema} },
@@ -63,15 +58,42 @@ Here are the builds to judge:\n`
 }`
     })
 
-    const response = await client.messages.create({
-      model: 'claude-opus-4-5',
-      max_tokens: 1500,
-      messages: [{ role: 'user', content }],
+    const body = {
+      contents: [{ role: 'user', parts }],
+      generationConfig: { maxOutputTokens: 1500, temperature: 0.7 },
+    }
+
+    const res = await fetch(VERTEX_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     })
 
-    const raw = response.content[0].type === 'text' ? response.content[0].text : ''
-    const cleaned = raw.replace(/```json\n?|\n?```/g, '').trim()
-    const parsed = JSON.parse(cleaned)
+    if (!res.ok) {
+      const errText = await res.text()
+      console.error('Vertex API error:', res.status, errText)
+      return NextResponse.json({ success: false, error: 'Judging failed' }, { status: 500 })
+    }
+
+    const data = await res.json()
+
+    let raw = ''
+    for (const candidate of data.candidates ?? []) {
+      const text = (candidate?.content?.parts ?? [])
+        .filter((p: { text?: string }) => p.text)
+        .map((p: { text: string }) => p.text)
+        .join('')
+        .trim()
+      if (text) { raw = text; break }
+    }
+
+    const stripped = raw.replace(/```(?:json)?\n?|\n?```/g, '').trim()
+    const match = stripped.match(/\{[\s\S]*\}/)
+    if (!match) {
+      console.error('Judge raw response (no JSON found):', raw)
+      return NextResponse.json({ success: false, error: 'No JSON in response' }, { status: 500 })
+    }
+    const parsed = JSON.parse(match[0])
 
     return NextResponse.json({ success: true, result: parsed })
   } catch (err) {

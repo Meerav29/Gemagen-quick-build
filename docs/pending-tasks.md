@@ -1,76 +1,86 @@
 # Pending Tasks
 
+## Current Priority: Camera Mode
+
+### Camera Capture (Mode 1 — Google-style)
+- [x] Add capture mode toggle to SetupScreen: "Camera" vs "Player Upload"
+- [x] Add camera source selector per player slot (device dropdown, duplicate validation)
+- [x] In PlayingScreen (camera mode): render a `<video>` element per player showing live feed
+- [x] Capture frames from video via canvas on commentary interval, convert to base64 JPEG
+- [x] On timer expiry, capture final frames and pass to `/api/judge`
+- [x] Multi-camera support: one camera per player, each mapped to a Player slot
+- [x] Camera permission / error handling (denied, in-use, disconnected mid-game)
+- [ ] AudienceView: show last captured frame per player during playing phase (currently shows "building…" placeholder in camera mode — frames are never written to Supabase Storage)
+
+---
+
 ## High Priority
 
-### Testing After Theme Redesign
-The entire frontend was redesigned (dark → white/navy) in one pass. It needs a full run-through:
-- [ ] Setup screen — all form states (build type toggle, preset selection, custom input, player count, start button enable/disable)
-- [ ] Playing screen — timer countdown, photo upload via click and drag-drop, commentary fetch trigger, commentary sidebar
-- [ ] Judging screen — spinner animation, status line cycling, player thumbnail display
-- [ ] Results screen — typewriter announcement, score bars animation, winner bounce-in, confetti, play again
-- [ ] Audience view at `/audience` — all 4 phases (waiting, playing, judging, results)
+### Player Upload Mode (Mode 2 — phone QR scan)
+The `/play/` route pages don't exist yet. The host screen shows a QR and links pointing to these URLs but they 404. Only needed if upload mode will be used:
+- [ ] `app/play/[gameId]/page.tsx` — player lobby: shows player name list, each taps their name
+- [ ] `app/play/[gameId]/[playerId]/page.tsx` — individual upload page: camera input → uploads to Supabase Storage → triggers Realtime update
+
+### End-to-End Testing
+The entire app needs a full run-through after the camera mode additions and theme redesign:
+- [ ] Setup screen — capture mode toggle, camera enumeration, camera selects, duplicate validation, canStart guard
+- [ ] Setup screen — upload mode: all original form states still work
+- [ ] Playing screen (camera mode) — streams start, video renders, commentary fires at 18s intervals, timer expiry captures final frames
+- [ ] Playing screen (upload mode) — join panel, QR code, Supabase Realtime photo updates, commentary
+- [ ] Judging screen — spinner, status lines, player thumbnails
+- [ ] Results screen — typewriter announcement, score bars, winner reveal, confetti, play again
+- [ ] Audience view — all 4 phases (waiting, playing, judging, results)
 
 ### Mobile Responsiveness
-The playing screen has a complex layout (timer in top bar + player grid + commentary sidebar). Test on:
-- [ ] Small phone (375px) — timer ring may overflow or collide with challenge text
-- [ ] Tablet (768px) — sidebar should stack below player grid (current `lg:flex-row` breakpoint)
-- [ ] The top bar at `px-6 py-3` may be too cramped with the SVG timer on small screens — consider reducing timer ring size on mobile (currently 112×112, could drop to 80×80)
+- [ ] Small phone (375px) — timer ring may overflow or collide with challenge text in top bar
+- [ ] Tablet (768px) — sidebar should stack below player grid (`lg:flex-row` breakpoint)
+- [ ] Consider reducing timer ring on mobile (currently 112×112, could drop to 80×80)
 
 ---
 
 ## Medium Priority
 
-### Audience View Cross-Device Sync
-Currently uses `localStorage`, which only works when host and projector are **the same browser on the same machine**. For actual classroom use across devices, this needs a real-time sync mechanism:
-- Options: Server-Sent Events (SSE), a simple polling API endpoint, or a WebSocket route
-- Quickest path: add a `/api/audience-state` GET route that reads from server-side memory, and a POST to update it — AudienceView polls the GET endpoint instead of localStorage
+### Audience View — Camera Frame Sync
+In camera mode, player `photo_path` in Supabase is never set, so AudienceView shows "building…" for all players throughout the game. Options:
+- [ ] After each commentary interval frame capture, upload the JPEG to Supabase Storage and update `players.photo_path` — AudienceView Realtime subscription picks it up automatically
+- [ ] Or: push frames to a separate Supabase column (e.g. `last_frame_base64` on the players table) — avoids Storage costs but pollutes the DB with large payloads
 
 ### Error Handling on API Routes
-Both `/api/commentary` and `/api/judge` can fail silently or with a generic error. Improvements:
 - [ ] Distinguish between "no API key" vs "API call failed" vs "JSON parse failed"
-- [ ] Surface a user-friendly error in JudgingScreen if judging fails partway through (currently shows generic message)
-- [ ] Rate limit / retry logic if commentary fetch fails (currently just logs to console)
+- [ ] Surface a user-friendly error in JudgingScreen if judging fails partway through
+- [ ] Retry logic if commentary fetch fails (currently just logs to console)
 
-### Players Without Photos in Judging
-If a player never uploads a photo, they are silently excluded from judging (`activePlayers = players.filter(p => p.photoBase64)`). This is undisclosed to the user. Options:
+### Players Without Photos in Judging (upload mode)
+If a player never uploads, they are silently excluded from judging:
 - [ ] Show a warning in JudgingScreen listing which players are excluded
-- [ ] Or allow judging to proceed on description alone for photoless players
 
 ---
 
 ## Low Priority / Future Improvements
 
 ### Challenge Preset Expansion
-Current presets are hardcoded arrays in `SetupScreen.tsx`. Could be:
-- [ ] Moved to a shared constants file
-- [ ] Extended with more categories (origami, clay, etc.)
-- [ ] Randomized with a "Surprise me" button
+- [ ] Randomized "Surprise me" button
+- [ ] More categories (origami, clay, etc.)
 
 ### Score Display — Audience Results View
-The audience results view shows medal emojis (🥇🥈🥉) for rank. These are the only remaining emojis in the UI post-redesign. If full emoji removal is desired, replace with SVG medal/podium icons.
+Medal emojis (🥇🥈🥉) are the only remaining emojis post-redesign. Replace with SVG if desired.
 
 ### Typewriter Speed
-The winner announcement typewriter in `ResultsScreen` uses a fixed 120ms per word. Long announcements can feel slow. Consider:
-- [ ] Adaptive speed based on total word count
-- [ ] A "skip" button to jump to scores immediately
+- [ ] Adaptive speed based on word count
+- [ ] "Skip" button to jump to scores
 
-### `ANTHROPIC_API_KEY` Dev Setup
-There's no `.env.local.example` file. New developers have no indication of what env vars are needed.
-- [ ] Add `.env.local.example` with `ANTHROPIC_API_KEY=your_key_here`
-- [ ] Add a mention in `README.md`
-
-### API Model Version
-Both routes hardcode `claude-opus-4-5`. This should be easy to update but is currently scattered:
-- [ ] Extract model name to a shared constant (e.g., in a `lib/ai.ts` file)
+### Env Var Documentation
+- [ ] Update `.env.example` to reflect actual vars: `VERTEX_API_KEY`, `VERTEX_MODEL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- [ ] Add `README.md` with setup instructions
 
 ### Accessibility
-- [ ] All interactive elements need visible focus outlines (currently only inputs have focus rings)
-- [ ] SVG icons used as meaningful content should have `aria-label` or be accompanied by text
-- [ ] Timer countdown should have an `aria-live` region for screen readers
+- [ ] Visible focus outlines on all interactive elements
+- [ ] `aria-label` on meaningful SVG icons
+- [ ] `aria-live` region for timer countdown
 
 ---
 
 ## Won't Fix / Out of Scope
-- Persistent game history / leaderboard (would require a database)
+- Persistent game history / leaderboard
 - Player authentication
-- Real-time multi-device gameplay beyond the audience projector sync
+- localStorage-based audience sync (replaced by Supabase Realtime)

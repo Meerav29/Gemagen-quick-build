@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { GameConfig, GamePhase, JudgingResult, Player } from './types'
+import { GamePhase, JudgingResult, Player } from './types'
+import { GameConfigExtended } from './types-extended'
 import SetupScreen from './components/SetupScreen'
 import PlayingScreen from './components/PlayingScreen'
 import JudgingScreen from './components/JudgingScreen'
@@ -9,12 +10,12 @@ import ResultsScreen from './components/ResultsScreen'
 
 export default function Home() {
   const [phase, setPhase] = useState<GamePhase>('setup')
-  const [config, setConfig] = useState<GameConfig | null>(null)
+  const [config, setConfig] = useState<GameConfigExtended | null>(null)
   const [gameId, setGameId] = useState<string | null>(null)
   const [finalPlayers, setFinalPlayers] = useState<Player[]>([])
   const [judgingResult, setJudgingResult] = useState<JudgingResult | null>(null)
 
-  const handleStart = async (cfg: GameConfig) => {
+  const handleStart = async (cfg: GameConfigExtended) => {
     setConfig(cfg)
 
     // Create game in Supabase
