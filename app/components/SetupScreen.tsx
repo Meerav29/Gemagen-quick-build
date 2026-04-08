@@ -80,6 +80,15 @@ function CameraIcon({ className = 'w-4 h-4' }: { className?: string }) {
   )
 }
 
+function PhoneIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <rect x="5" y="2" width="10" height="16" rx="2" />
+      <circle cx="10" cy="15.5" r="0.75" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
 function UploadIcon({ className = 'w-4 h-4' }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -171,10 +180,11 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
 
   // In shared mode: just need at least one camera detected.
   // In per-player mode: every player slot must have a camera selected, no duplicates.
-  const allCamerasAssigned = captureMode === 'upload'
-    || cameraLayout === 'shared'
+  // In phone/upload mode: no local camera needed.
+  const allCamerasAssigned = captureMode !== 'camera'
+    || (cameraLayout === 'shared'
       ? availableCameras.length > 0
-      : (activePlayers.every((_, i) => !!cameraAssignments[i]) && availableCameras.length > 0)
+      : (activePlayers.every((_, i) => !!cameraAssignments[i]) && availableCameras.length > 0))
 
   const hasDuplicateCameras = captureMode === 'camera' && cameraLayout === 'per-player' && (() => {
     const assigned = activePlayers.map((_, i) => cameraAssignments[i]).filter(Boolean)
@@ -194,7 +204,6 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
     let cameraAssignmentsList: { playerId: string; deviceId: string }[] = []
     if (captureMode === 'camera') {
       if (cameraLayout === 'shared') {
-        // All players share the first/only camera
         const sharedDeviceId = availableCameras[0]?.deviceId ?? ''
         cameraAssignmentsList = players.map(p => ({ playerId: p.id, deviceId: sharedDeviceId }))
       } else {
@@ -208,7 +217,7 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
       challenge: selectedChallenge.trim(),
       timerSeconds,
       captureMode,
-      cameraLayout,
+      cameraLayout: captureMode === 'camera' ? cameraLayout : 'shared',
       cameraAssignments: cameraAssignmentsList,
     })
   }
@@ -323,24 +332,38 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
             <label className="flex items-center gap-2 text-xs font-semibold text-[#64748B] uppercase tracking-wider mb-3">
               <CameraIcon /> Capture Mode
             </label>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => handleCaptureModeChange('upload')}
-                className={`py-3 px-4 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all ${
-                  captureMode === 'upload' ? 'bg-[#1B3A6B] text-white shadow-sm' : 'btn-ghost'
-                }`}
-              >
-                <UploadIcon /> Player Upload
-              </button>
+            <div className="grid grid-cols-3 gap-2">
               <button
                 onClick={() => handleCaptureModeChange('camera')}
-                className={`py-3 px-4 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all ${
+                className={`py-3 px-3 rounded-lg text-xs font-medium flex flex-col items-center justify-center gap-1.5 transition-all ${
                   captureMode === 'camera' ? 'bg-[#1B3A6B] text-white shadow-sm' : 'btn-ghost'
                 }`}
               >
-                <CameraIcon /> Live Camera
+                <CameraIcon className="w-4 h-4" /> Host Camera
+              </button>
+              <button
+                onClick={() => handleCaptureModeChange('phone')}
+                className={`py-3 px-3 rounded-lg text-xs font-medium flex flex-col items-center justify-center gap-1.5 transition-all ${
+                  captureMode === 'phone' ? 'bg-[#1B3A6B] text-white shadow-sm' : 'btn-ghost'
+                }`}
+              >
+                <PhoneIcon className="w-4 h-4" /> Phone Cameras
+              </button>
+              <button
+                onClick={() => handleCaptureModeChange('upload')}
+                className={`py-3 px-3 rounded-lg text-xs font-medium flex flex-col items-center justify-center gap-1.5 transition-all ${
+                  captureMode === 'upload' ? 'bg-[#1B3A6B] text-white shadow-sm' : 'btn-ghost'
+                }`}
+              >
+                <UploadIcon className="w-4 h-4" /> Player Upload
               </button>
             </div>
+
+            {captureMode === 'phone' && (
+              <p className="mt-3 text-xs text-[#64748B]">
+                Each player scans a QR code on their phone to open a live camera stream. QR codes appear once the game starts.
+              </p>
+            )}
 
             {captureMode === 'camera' && camerasLoading && (
               <p className="mt-3 text-xs text-[#64748B]">Detecting cameras…</p>

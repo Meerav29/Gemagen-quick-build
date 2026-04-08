@@ -1,7 +1,7 @@
 export * from './types'
 import type { GameConfig } from './types'
 
-export type CaptureMode = 'upload' | 'camera'
+export type CaptureMode = 'upload' | 'camera' | 'phone'
 export type CameraLayout = 'shared' | 'per-player'
 
 export interface PlayerCameraAssignment {

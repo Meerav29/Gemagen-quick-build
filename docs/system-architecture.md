@@ -20,7 +20,8 @@ app/
 ├── page.tsx                  # Root — game state machine
 ├── layout.tsx                # HTML shell, font imports
 ├── globals.css               # CSS tokens, shared utility classes
-├── types.ts                  # All shared TypeScript interfaces
+├── types.ts                  # All shared TypeScript interfaces (frozen — do not edit)
+├── types-extended.ts         # Extended types (CaptureMode, CameraLayout, GameConfigExtended)
 ├── audience/
 │   └── page.tsx              # Thin wrapper → renders AudienceView at /audience
 ├── components/
@@ -65,8 +66,13 @@ The app supports two photo capture modes, selectable at setup:
 ### Mode 1: Camera (default, Google-style)
 A webcam is pointed at the workspace. The host browser captures frames from a `<video>` element via canvas at a regular interval and sends them to `/api/commentary`. No player interaction required — the AI watches the feed continuously.
 
-- Supports multiple cameras (one per desk) — user selects source in setup
-- Frame capture happens client-side; base64 JPEG is POSTed to the existing API routes unchanged
+Two camera layout sub-options (chosen in the Capture Mode card at setup):
+- **Shared camera** — one webcam, all players share the same feed. One `MediaStream` is opened; each PlayerCard mirrors the same `srcObject`. Frame captures are identical for all players (the AI sees the same image but comments on each player's progress based on prior context).
+- **One per player** — separate webcam per desk. User assigns each player slot to a detected device via dropdown. One `MediaStream` per player, captured independently.
+
+In both layouts:
+- Frame capture happens client-side via a hidden `<canvas>`; base64 JPEG is POSTed to the API routes unchanged
+- After each commentary interval, captured frames are upserted to Supabase Storage (`player-photos/{gameId}/{playerId}.jpg`) and `players.photo_path` is updated — this triggers AudienceView's Realtime subscription so the projector shows live frames
 - Timer expiry triggers a final frame capture → `/api/judge`
 
 ### Mode 2: Player Upload
@@ -128,7 +134,9 @@ Called every 18 seconds during gameplay if at least one player has a photo. Also
 { success: true, playerName: string, commentary: string }
 ```
 
-**Model:** Gemini 2.5 Flash via Vertex AI — multimodal, max 256 tokens
+**Model:** Gemini 2.5 Flash via Vertex AI — multimodal, max 1024 tokens
+
+**JSON parsing:** response is extracted with `/\{[\s\S]*\}/` regex before `JSON.parse` to handle markdown fences or extra prose the model may prepend.
 
 ---
 
@@ -155,7 +163,9 @@ Called once when time expires (after a 1.5s delay for drama).
 
 **Model:** Gemini 2.5 Flash via Vertex AI — multimodal, max 1500 tokens
 
-## Data Types (app/types.ts)
+## Data Types
+
+### app/types.ts (frozen — do not modify)
 ```ts
 Player           { id, name, photoDataUrl, photoBase64 }
 CommentaryEntry  { id, playerName, text, timestamp }
@@ -164,6 +174,14 @@ JudgingResult    { scores, overallWinner, winnerAnnouncementScript }
 GameConfig       { players, buildType, challenge, timerSeconds }
 GamePhase        'setup' | 'playing' | 'judging' | 'results'
 BuildType        'lego' | 'drawing'
+```
+
+### app/types-extended.ts (extends types.ts without modifying it)
+```ts
+CaptureMode           'upload' | 'camera'
+CameraLayout          'shared' | 'per-player'
+PlayerCameraAssignment { playerId: string, deviceId: string }
+GameConfigExtended    extends GameConfig, adds: captureMode, cameraLayout, cameraAssignments[]
 ```
 
 ## Environment Variables

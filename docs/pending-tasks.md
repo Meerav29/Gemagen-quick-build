@@ -4,13 +4,13 @@
 
 ### Camera Capture (Mode 1 — Google-style)
 - [x] Add capture mode toggle to SetupScreen: "Camera" vs "Player Upload"
-- [x] Add camera source selector per player slot (device dropdown, duplicate validation)
+- [x] Add camera layout sub-toggle: "One shared camera" vs "One per player" (in Capture Mode card, not per-player in Players card)
 - [x] In PlayingScreen (camera mode): render a `<video>` element per player showing live feed
 - [x] Capture frames from video via canvas on commentary interval, convert to base64 JPEG
 - [x] On timer expiry, capture final frames and pass to `/api/judge`
 - [x] Multi-camera support: one camera per player, each mapped to a Player slot
 - [x] Camera permission / error handling (denied, in-use, disconnected mid-game)
-- [ ] AudienceView: show last captured frame per player during playing phase (currently shows "building…" placeholder in camera mode — frames are never written to Supabase Storage)
+- [x] AudienceView: upsert captured frames to Supabase Storage + update `players.photo_path` after each commentary interval — Realtime subscription picks it up automatically, projector shows live frames
 
 ---
 
@@ -32,21 +32,20 @@ The entire app needs a full run-through after the camera mode additions and them
 - [ ] Audience view — all 4 phases (waiting, playing, judging, results)
 
 ### Mobile Responsiveness
-- [ ] Small phone (375px) — timer ring may overflow or collide with challenge text in top bar
-- [ ] Tablet (768px) — sidebar should stack below player grid (`lg:flex-row` breakpoint)
-- [ ] Consider reducing timer ring on mobile (currently 112×112, could drop to 80×80)
+- [x] Dual timer SVG: 80px on mobile, 112px on sm+ — prevents collision with challenge text
+- [x] 3-player grid: 2-col on mobile, 3-col on sm+
+- [x] SetupScreen: padding and heading sizes adjusted for small screens
+- [ ] Tablet (768px) — sidebar stacks below player grid at `lg:` breakpoint (intended behavior, verify in prod)
 
 ---
 
 ## Medium Priority
 
-### Audience View — Camera Frame Sync
-In camera mode, player `photo_path` in Supabase is never set, so AudienceView shows "building…" for all players throughout the game. Options:
-- [ ] After each commentary interval frame capture, upload the JPEG to Supabase Storage and update `players.photo_path` — AudienceView Realtime subscription picks it up automatically
-- [ ] Or: push frames to a separate Supabase column (e.g. `last_frame_base64` on the players table) — avoids Storage costs but pollutes the DB with large payloads
-
 ### Error Handling on API Routes
-- [ ] Distinguish between "no API key" vs "API call failed" vs "JSON parse failed"
+- [x] Commentary route: extract JSON with `/\{[\s\S]*\}/` regex instead of blind `JSON.parse` — handles model prepending prose or markdown fences
+- [x] Commentary `maxOutputTokens` raised from 256 → 1024 — fixes truncated JSON responses
+- [x] Both routes log raw model response if no JSON object is found
+- [ ] Distinguish "no API key" vs "API call failed" vs "JSON parse failed" for user-facing errors
 - [ ] Surface a user-friendly error in JudgingScreen if judging fails partway through
 - [ ] Retry logic if commentary fetch fails (currently just logs to console)
 
@@ -69,9 +68,12 @@ Medal emojis (🥇🥈🥉) are the only remaining emojis post-redesign. Replace
 - [ ] Adaptive speed based on word count
 - [ ] "Skip" button to jump to scores
 
-### Env Var Documentation
-- [ ] Update `.env.example` to reflect actual vars: `VERTEX_API_KEY`, `VERTEX_MODEL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- [ ] Add `README.md` with setup instructions
+### Deployment
+- [ ] Rotate leaked credentials (`.env.example` was committed to git with real keys — regenerate Vertex API key + Supabase anon key)
+- [ ] Strip real values from `.env.example`, replace with placeholders
+- [ ] Push repo to GitHub, connect to Vercel, add env vars in Vercel dashboard
+- [ ] Add Vercel domain to Supabase allowed origins (Authentication → URL Configuration)
+- [ ] Add `README.md` with local setup and deploy instructions
 
 ### Accessibility
 - [ ] Visible focus outlines on all interactive elements

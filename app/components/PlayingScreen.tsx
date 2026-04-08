@@ -109,12 +109,13 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null)
 
   const isCameraMode = config.captureMode === 'camera'
+  const isPhoneMode = config.captureMode === 'phone'
   const isSharedCamera = isCameraMode && config.cameraLayout === 'shared'
 
-  // Set join URL on mount (client-only, upload mode only)
+  // Set join URL on mount (client-only, upload + phone modes)
   useEffect(() => {
     if (!isCameraMode) {
-      setJoinUrl(`${window.location.origin}/play/${gameId}`)
+      setJoinUrl(window.location.origin)
     }
   }, [gameId, isCameraMode])
 
@@ -131,8 +132,6 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
   // Camera mode: start streams on mount
   useEffect(() => {
     if (!isCameraMode) return
-
-    // Immediately hide join panel
     setJoinPanelOpen(false)
 
     const assignments = config.cameraAssignments
@@ -217,11 +216,15 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
     }
   }, [isCameraMode, config.cameraAssignments])
 
-  // Upload mode: auto-collapse join panel once all players have photos
+  // Upload + phone mode: auto-collapse join panel once all players have photos
   useEffect(() => {
     if (isCameraMode) return
     if (players.every(p => p.photoBase64)) setJoinPanelOpen(false)
   }, [players, isCameraMode])
+
+  // Phone mode: derive per-player camera URLs (only available client-side)
+  const [origin, setOrigin] = useState('')
+  useEffect(() => { setOrigin(window.location.origin) }, [])
 
   // Capture a frame from a player's video element (or the shared video in shared mode)
   const captureFrameForPlayer = useCallback((playerId: string): string | null => {
@@ -290,7 +293,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
     return () => clearInterval(timerRef.current!)
   }, [gameStarted, gameId, onTimeUp, isCameraMode, buildPlayersWithFrames])
 
-  // Upload mode: Supabase Realtime — watch for player photo uploads
+  // Upload + phone mode: Supabase Realtime — watch for player photo uploads
   useEffect(() => {
     if (isCameraMode) return
     const channel = supabase
@@ -450,22 +453,28 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
         </div>
       </div>
 
-      {/* Join panel — upload mode only */}
+      {/* Join panel — upload mode or phone mode */}
       {!isCameraMode && joinUrl && (
         <div className="bg-[#1B3A6B] text-white">
           <div className="px-6 py-2 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <QrIcon className="w-4 h-4 opacity-70" />
-              <span className="text-sm font-semibold tracking-wide">
-                Players join at: <span className="font-mono text-[#93C5FD]">{joinUrl}</span>
-              </span>
-              <span className="bg-white/20 text-white text-xs font-bold font-mono px-2 py-0.5 rounded tracking-widest">
-                {gameId}
-              </span>
+              {isPhoneMode ? (
+                <span className="text-sm font-semibold tracking-wide">Phone cameras — each player scans their QR</span>
+              ) : (
+                <span className="text-sm font-semibold tracking-wide">
+                  Players join at: <span className="font-mono text-[#93C5FD]">{joinUrl}/play/{gameId}</span>
+                </span>
+              )}
+              {!isPhoneMode && (
+                <span className="bg-white/20 text-white text-xs font-bold font-mono px-2 py-0.5 rounded tracking-widest">
+                  {gameId}
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <span className="text-xs opacity-60">
-                {players.filter(p => p.photoBase64).length}/{players.length} ready
+                {players.filter(p => p.photoBase64).length}/{players.length} live
               </span>
               <button
                 onClick={() => setJoinPanelOpen(o => !o)}
@@ -477,33 +486,65 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
           </div>
 
           {joinPanelOpen && (
-            <div className="px-6 pb-4 flex items-start gap-6 border-t border-white/10 pt-3">
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(joinUrl)}&size=120x120&bgcolor=1B3A6B&color=ffffff&margin=4`}
-                alt="QR code"
-                className="rounded-lg flex-shrink-0"
-                width={120}
-                height={120}
-              />
-              <div className="flex-1">
-                <p className="text-sm opacity-70 mb-3">Each player scans and taps their name to upload a photo</p>
-                <div className="flex flex-wrap gap-2">
-                  {players.map((p, i) => (
-                    <div
-                      key={p.id}
-                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
-                      style={{ background: p.photoBase64 ? '#16A34A33' : '#ffffff22', color: p.photoBase64 ? '#86EFAC' : '#ffffff99' }}
-                    >
-                      <span
-                        className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
-                        style={{ background: PLAYER_COLORS[i] }}
-                      >{i + 1}</span>
-                      {p.name}
-                      {p.photoBase64 && ' ✓'}
-                    </div>
-                  ))}
+            <div className="px-6 pb-4 border-t border-white/10 pt-3">
+              {isPhoneMode ? (
+                // One QR per player
+                <div className="flex flex-wrap gap-6">
+                  {players.map((p, i) => {
+                    const url = `${origin}/camera/${gameId}/${p.id}`
+                    return (
+                      <div key={p.id} className="flex flex-col items-center gap-2">
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(url)}&size=100x100&bgcolor=1B3A6B&color=ffffff&margin=4`}
+                          alt={`QR for ${p.name}`}
+                          className="rounded-lg"
+                          width={100}
+                          height={100}
+                        />
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
+                            style={{ background: PLAYER_COLORS[i] }}
+                          >{i + 1}</span>
+                          <span className={`text-xs font-semibold ${p.photoBase64 ? 'text-[#86EFAC]' : 'text-white/70'}`}>
+                            {p.name}{p.photoBase64 ? ' ✓' : ''}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
-              </div>
+              ) : (
+                // Upload mode: single QR + player list
+                <div className="flex items-start gap-6">
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(`${joinUrl}/play/${gameId}`)}&size=120x120&bgcolor=1B3A6B&color=ffffff&margin=4`}
+                    alt="QR code"
+                    className="rounded-lg flex-shrink-0"
+                    width={120}
+                    height={120}
+                  />
+                  <div className="flex-1">
+                    <p className="text-sm opacity-70 mb-3">Each player scans and taps their name to upload a photo</p>
+                    <div className="flex flex-wrap gap-2">
+                      {players.map((p, i) => (
+                        <div
+                          key={p.id}
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
+                          style={{ background: p.photoBase64 ? '#16A34A33' : '#ffffff22', color: p.photoBase64 ? '#86EFAC' : '#ffffff99' }}
+                        >
+                          <span
+                            className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
+                            style={{ background: PLAYER_COLORS[i] }}
+                          >{i + 1}</span>
+                          {p.name}
+                          {p.photoBase64 && ' ✓'}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -562,6 +603,8 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
                 <p className="text-xs text-[#94A3B8] leading-relaxed">
                   {isCameraMode
                     ? 'Commentary starts once cameras are live'
+                    : isPhoneMode
+                    ? 'Commentary starts once phones send their first frames'
                     : 'Commentary starts once players upload their first photos'}
                 </p>
               </div>
