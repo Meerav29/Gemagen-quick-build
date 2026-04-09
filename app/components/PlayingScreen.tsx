@@ -95,6 +95,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
   const [joinPanelOpen, setJoinPanelOpen] = useState(true)
   const [activeStreamCount, setActiveStreamCount] = useState(0)
   const [cameraErrors, setCameraErrors] = useState<Record<string, string>>({})
+  const [ttsEnabled, setTtsEnabled] = useState(true)
 
   const commentaryRef = useRef<HTMLDivElement>(null)
   const previousCommentsRef = useRef<string[]>([])
@@ -315,6 +316,15 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
     return () => { supabase.removeChannel(channel) }
   }, [gameId, isCameraMode])
 
+  const speakCommentary = useCallback((text: string) => {
+    if (!ttsEnabled || typeof window === 'undefined' || !window.speechSynthesis) return
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.rate = 1.05
+    utterance.pitch = 1.0
+    window.speechSynthesis.speak(utterance)
+  }, [ttsEnabled])
+
   const fetchCommentary = useCallback(async (currentPlayers: Player[]) => {
     const playersWithPhotos = currentPlayers.filter(p => p.photoBase64)
     if (playersWithPhotos.length === 0) return
@@ -339,6 +349,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
           timestamp: Date.now(),
         }
         previousCommentsRef.current = [...previousCommentsRef.current.slice(-5), data.commentary]
+        speakCommentary(data.commentary)
         setCommentary(prev => {
           const updated = [entry, ...prev].slice(0, 8)
           supabase.from('games').update({ commentary: updated }).eq('id', gameId)
@@ -593,6 +604,28 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
               <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wider flex items-center gap-1.5">
                 <MicIcon className="w-3.5 h-3.5" /> Live Commentary
               </span>
+              <button
+                onClick={() => {
+                  if (ttsEnabled) window.speechSynthesis?.cancel()
+                  setTtsEnabled(e => !e)
+                }}
+                title={ttsEnabled ? 'Mute voice' : 'Unmute voice'}
+                className="ml-auto text-[#94A3B8] hover:text-[#1B3A6B] transition-colors"
+              >
+                {ttsEnabled ? (
+                  <svg className="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M9 5L5 8H3a1 1 0 00-1 1v2a1 1 0 001 1h2l4 3V5z" strokeLinejoin="round" />
+                    <path d="M13 7a4 4 0 010 6" strokeLinecap="round" />
+                    <path d="M15.5 4.5a7 7 0 010 11" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M9 5L5 8H3a1 1 0 00-1 1v2a1 1 0 001 1h2l4 3V5z" strokeLinejoin="round" />
+                    <line x1="13" y1="8" x2="18" y2="13" strokeLinecap="round" />
+                    <line x1="18" y1="8" x2="13" y2="13" strokeLinecap="round" />
+                  </svg>
+                )}
+              </button>
             </div>
           </div>
 
