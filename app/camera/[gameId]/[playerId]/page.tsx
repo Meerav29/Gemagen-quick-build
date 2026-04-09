@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, use } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -15,9 +15,9 @@ type Status = 'loading' | 'permission' | 'live' | 'error' | 'done'
 export default function PhoneCameraPage({
   params,
 }: {
-  params: Promise<{ gameId: string; playerId: string }>
+  params: { gameId: string; playerId: string }
 }) {
-  const { gameId, playerId } = use(params)
+  const { gameId, playerId } = params
 
   const [status, setStatus] = useState<Status>('loading')
   const [playerName, setPlayerName] = useState<string>('')
