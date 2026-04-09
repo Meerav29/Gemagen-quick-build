@@ -60,7 +60,7 @@ Here are the builds to judge:`
 
     const body = {
       contents: [{ role: 'user', parts }],
-      generationConfig: { maxOutputTokens: 1500, temperature: 0.7 },
+      generationConfig: { maxOutputTokens: 4096, temperature: 0.7 },
     }
 
     const res = await fetch(VERTEX_URL, {
