@@ -191,35 +191,31 @@ export default function PhoneCameraPage({
           </div>
         )}
 
-        {status === 'live' && (
-          <div className="space-y-4">
-            {/* Live preview */}
-            <div className="relative rounded-2xl overflow-hidden bg-black aspect-video">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover"
-              />
-              {/* Live badge */}
-              <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-full">
-                <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                <span className="text-xs font-semibold text-white">LIVE</span>
-              </div>
+        {/* Video element always in DOM so ref is available before status='live' */}
+        <div className={status === 'live' ? 'space-y-4' : 'hidden'}>
+          <div className="relative rounded-2xl overflow-hidden bg-black aspect-video">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-full">
+              <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+              <span className="text-xs font-semibold text-white">LIVE</span>
             </div>
-
-            {/* Frame counter */}
-            <div className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex items-center justify-between">
-              <span className="text-sm text-white/60">Frames sent</span>
-              <span className="text-sm font-bold text-white tabular-nums">{frameCount}</span>
-            </div>
-
-            <p className="text-center text-xs text-white/30">
-              Uploading every {CAPTURE_INTERVAL / 1000}s · keep this tab open
-            </p>
           </div>
-        )}
+
+          <div className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex items-center justify-between">
+            <span className="text-sm text-white/60">Frames sent</span>
+            <span className="text-sm font-bold text-white tabular-nums">{frameCount}</span>
+          </div>
+
+          <p className="text-center text-xs text-white/30">
+            Uploading every {CAPTURE_INTERVAL / 1000}s · keep this tab open
+          </p>
+        </div>
 
         {status === 'error' && (
           <div className="bg-red-950/50 border border-red-500/30 rounded-2xl p-6 text-center space-y-3">
