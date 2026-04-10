@@ -23,6 +23,7 @@ export default function PhoneCameraPage({
   const [playerName, setPlayerName] = useState<string>('')
   const [errorMsg, setErrorMsg] = useState<string>('')
   const [frameCount, setFrameCount] = useState(0)
+  const [debugLog, setDebugLog] = useState<string[]>([])
   const [gamePhase, setGamePhase] = useState<string>('waiting')
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -109,15 +110,18 @@ export default function PhoneCameraPage({
     }
   }
 
+  const log = (msg: string) => setDebugLog(prev => [...prev.slice(-6), msg])
+
   const captureAndUpload = async () => {
     const video = videoRef.current
     const canvas = canvasRef.current
-    if (!video || !canvas || video.readyState < 2) return
+    if (!video || !canvas) { log('no video/canvas ref'); return }
+    if (video.readyState < 2) { log(`video not ready (state=${video.readyState})`); return }
 
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
     const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    if (!ctx) { log('no canvas ctx'); return }
 
     ctx.drawImage(video, 0, 0)
     const dataUrl = canvas.toDataURL('image/jpeg', 0.8)
@@ -125,13 +129,17 @@ export default function PhoneCameraPage({
     const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
     const path = `${gameId}/${playerId}.jpg`
 
+    log(`uploading ${Math.round(bytes.length / 1024)}kb…`)
     const { error } = await supabase.storage
       .from('player-photos')
       .upload(path, bytes, { contentType: 'image/jpeg', upsert: true })
 
-    if (!error) {
-      await supabase.from('players').update({ photo_path: path }).eq('id', playerId)
-      setFrameCount(c => c + 1)
+    if (error) {
+      log(`upload error: ${error.message}`)
+    } else {
+      const { error: dbErr } = await supabase.from('players').update({ photo_path: path }).eq('id', playerId)
+      if (dbErr) log(`db error: ${dbErr.message}`)
+      else setFrameCount(c => c + 1)
     }
   }
 
@@ -215,6 +223,14 @@ export default function PhoneCameraPage({
           <p className="text-center text-xs text-white/30">
             Uploading every {CAPTURE_INTERVAL / 1000}s · keep this tab open
           </p>
+
+          {debugLog.length > 0 && (
+            <div className="bg-black/40 rounded-xl p-3 space-y-1">
+              {debugLog.map((line, i) => (
+                <p key={i} className="text-xs text-white/50 font-mono">{line}</p>
+              ))}
+            </div>
+          )}
         </div>
 
         {status === 'error' && (
