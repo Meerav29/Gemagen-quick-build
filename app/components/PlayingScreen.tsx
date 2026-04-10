@@ -70,7 +70,7 @@ function CameraOffIcon({ className = 'w-8 h-8' }: { className?: string }) {
 async function photoPathToBase64(path: string): Promise<{ dataUrl: string; base64: string } | null> {
   try {
     const { data } = supabase.storage.from('player-photos').getPublicUrl(path)
-    const response = await fetch(data.publicUrl)
+    const response = await fetch(`${data.publicUrl}?t=${Date.now()}`)
     const blob = await response.blob()
     return new Promise((resolve) => {
       const reader = new FileReader()

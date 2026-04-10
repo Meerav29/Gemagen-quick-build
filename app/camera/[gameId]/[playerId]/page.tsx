@@ -8,7 +8,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-const CAPTURE_INTERVAL = 8000 // ms between frame uploads
+const CAPTURE_INTERVAL = 2500 // ms between frame uploads
 
 type Status = 'loading' | 'permission' | 'live' | 'error' | 'done'
 
