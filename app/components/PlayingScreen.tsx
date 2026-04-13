@@ -402,6 +402,14 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
             pendingPhoneCandidatesRef.current[player.id].push(payload)
           }
         })
+        .on('broadcast', { event: 'fallback-frame' }, async ({ payload }) => {
+          const { path } = payload as { path: string }
+          const result = await photoPathToBase64(path)
+          if (!result) return
+          setPlayers(prev =>
+            prev.map(p => p.id === player.id ? { ...p, photoDataUrl: result.dataUrl, photoBase64: result.base64 } : p)
+          )
+        })
         .subscribe()
     })
 
@@ -425,10 +433,10 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'players', filter: `game_id=eq.${gameId}` },
         async (payload) => {
-          const { id, photo_path, webrtc_state } = payload.new as {
-            id: string; photo_path: string | null; webrtc_state: string
+          const { id, photo_path } = payload.new as {
+            id: string; photo_path: string | null
           }
-          if (webrtc_state !== 'fallback' || !photo_path) return
+          if (!photo_path) return
           const result = await photoPathToBase64(photo_path)
           if (!result) return
           setPlayers(prev =>

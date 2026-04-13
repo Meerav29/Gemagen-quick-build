@@ -123,7 +123,12 @@ export default function PhoneCameraPage({
       .upload(path, bytes, { contentType: 'image/jpeg', upsert: true })
 
     if (!error) {
-      await supabase.from('players').update({ photo_path: path }).eq('id', playerId)
+      await supabase.from('players').update({ photo_path: path, webrtc_state: 'fallback' }).eq('id', playerId)
+      signalingChannelRef.current?.send({
+        type: 'broadcast',
+        event: 'fallback-frame',
+        payload: { path },
+      })
       setFallbackFrames(c => c + 1)
     }
   }
@@ -132,10 +137,7 @@ export default function PhoneCameraPage({
     clearTimeout(webrtcTimeoutRef.current!)
     pcRef.current?.close()
     pcRef.current = null
-    if (signalingChannelRef.current) {
-      supabase.removeChannel(signalingChannelRef.current)
-      signalingChannelRef.current = null
-    }
+    // Keep signalingChannelRef open — reused to broadcast fallback frames to the dashboard
     await supabase.from('players').update({ webrtc_state: 'fallback' }).eq('id', playerId)
     setWebrtcState('failed')
     setIsFallback(true)
