@@ -101,6 +101,9 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
   const [commentary, setCommentary] = useState<CommentaryEntry[]>([])
   const [isLoadingCommentary, setIsLoadingCommentary] = useState(false)
   const [gameStarted, setGameStarted] = useState(false)
+  const [inSetup, setInSetup] = useState(true)
+  const [setupTimeLeft, setSetupTimeLeft] = useState(30)
+  const setupTimerRef = useRef<NodeJS.Timeout | null>(null)
   const [joinUrl, setJoinUrl] = useState('')
   const [joinPanelOpen, setJoinPanelOpen] = useState(true)
   const [activeStreamCount, setActiveStreamCount] = useState(0)
@@ -288,9 +291,25 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
     )
   }, [gameId])
 
-  // Timer
+  // Setup countdown — 30 seconds before the real timer starts
   useEffect(() => {
     if (!gameStarted) return
+    setupTimerRef.current = setInterval(() => {
+      setSetupTimeLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(setupTimerRef.current!)
+          setInSetup(false)
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => clearInterval(setupTimerRef.current!)
+  }, [gameStarted])
+
+  // Game timer — starts only after setup phase ends
+  useEffect(() => {
+    if (!gameStarted || inSetup) return
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
@@ -312,7 +331,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
       })
     }, 1000)
     return () => clearInterval(timerRef.current!)
-  }, [gameStarted, gameId, onTimeUp, isCameraMode, buildPlayersWithFrames])
+  }, [gameStarted, inSetup, gameId, onTimeUp, isCameraMode, buildPlayersWithFrames])
 
   // Upload mode: watch for photo uploads via Realtime
   useEffect(() => {
@@ -556,7 +575,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
 
   // Commentary interval — forked by capture mode
   useEffect(() => {
-    if (!gameStarted) return
+    if (!gameStarted || inSetup) return
     commentaryTimerRef.current = setInterval(() => {
       if (isCameraMode || isPhoneMode) {
         setPlayers(curr => {
@@ -570,7 +589,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
       }
     }, COMMENTARY_INTERVAL)
     return () => clearInterval(commentaryTimerRef.current!)
-  }, [gameStarted, fetchCommentary, isCameraMode, buildPlayersWithFrames, pushFramesToSupabase])
+  }, [gameStarted, inSetup, fetchCommentary, isCameraMode, buildPlayersWithFrames, pushFramesToSupabase])
 
   const handleManualCommentary = () => {
     if (isCameraMode || isPhoneMode) {
@@ -584,12 +603,12 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
   const commentaryButtonDisabled = isLoadingCommentary ||
     (!isCameraMode && !isPhoneMode && players.every(p => !p.photoBase64))
 
-  const progress = timeLeft / config.timerSeconds
   const radius = 50
   const circumference = 2 * Math.PI * radius
-  const dashOffset = circumference * (1 - progress)
-  const timerColor = timeLeft > 30 ? '#16A34A' : timeLeft > 15 ? '#D97706' : '#DC2626'
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  const progress = inSetup ? setupTimeLeft / 30 : timeLeft / config.timerSeconds
+  const timerColor = inSetup ? '#D97706' : timeLeft > 30 ? '#16A34A' : timeLeft > 15 ? '#D97706' : '#DC2626'
+  const dashOffset = circumference * (1 - progress)
 
   const allPlayersReady = isCameraMode
     ? activeStreamCount === players.length
@@ -638,10 +657,10 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
           </svg>
           <div className="absolute flex flex-col items-center">
             <span className="font-display text-base sm:text-xl font-bold tabular-nums leading-none" style={{ color: timerColor }}>
-              {formatTime(timeLeft)}
+              {inSetup ? setupTimeLeft : formatTime(timeLeft)}
             </span>
             <span className="text-[8px] sm:text-[9px] text-[#94A3B8] uppercase tracking-widest mt-0.5">
-              {timeLeft === 0 ? 'TIME!' : 'left'}
+              {inSetup ? 'setup' : timeLeft === 0 ? 'TIME!' : 'left'}
             </span>
           </div>
         </div>
@@ -653,6 +672,17 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
           </div>
         </div>
       </div>
+
+      {/* Setup phase banner */}
+      {inSetup && (
+        <div className="bg-[#D97706] text-white px-6 py-2 flex items-center justify-center gap-2 text-sm font-semibold">
+          <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="10" cy="10" r="8" />
+            <path d="M10 6v4l2.5 2.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Get cameras ready — game starts in {setupTimeLeft}s
+        </div>
+      )}
 
       {/* Join panel — upload mode or phone mode */}
       {!isCameraMode && joinUrl && (
@@ -923,7 +953,7 @@ function PlayerCard({
             </div>
           ) : player.photoDataUrl && !hasRemoteStream ? (
             // Fallback: show last JPEG from polling
-            <img src={player.photoDataUrl} alt={`${player.name}'s build`} className="w-full h-full object-cover" />
+            <img src={player.photoDataUrl} alt={`${player.name}'s build`} className="w-full h-full object-contain bg-black" />
           ) : (
             // Video element for WebRTC stream (or connecting state)
             <div className="relative w-full h-full bg-[#0F172A]">
