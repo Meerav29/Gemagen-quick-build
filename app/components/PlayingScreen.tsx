@@ -68,10 +68,16 @@ function CameraOffIcon({ className = 'w-8 h-8' }: { className?: string }) {
   )
 }
 
-async function photoPathToBase64(path: string): Promise<{ dataUrl: string; base64: string } | null> {
+async function photoPathToBase64(path: string): Promise<{ dataUrl: string; base64: string; error?: string } | null> {
   try {
     const { data } = supabase.storage.from('player-photos').getPublicUrl(path)
-    const response = await fetch(`${data.publicUrl}?t=${Date.now()}`)
+    const url = `${data.publicUrl}?t=${Date.now()}`
+    const response = await fetch(url)
+    if (!response.ok) {
+      const msg = `HTTP ${response.status} from ${url}`
+      console.error('[photoPathToBase64]', msg)
+      return { dataUrl: '', base64: '', error: msg }
+    }
     const blob = await response.blob()
     return new Promise((resolve) => {
       const reader = new FileReader()
@@ -79,10 +85,13 @@ async function photoPathToBase64(path: string): Promise<{ dataUrl: string; base6
         const dataUrl = e.target?.result as string
         resolve({ dataUrl, base64: dataUrl.split(',')[1] })
       }
+      reader.onerror = () => resolve({ dataUrl: '', base64: '', error: 'FileReader failed' })
       reader.readAsDataURL(blob)
     })
-  } catch {
-    return null
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('[photoPathToBase64]', msg)
+    return { dataUrl: '', base64: '', error: msg }
   }
 }
 
@@ -116,6 +125,9 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
   const pendingPhoneCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({})
   // Tracks which players have an active media stream flowing (not just a signaled PC)
   const [liveStreamPlayers, setLiveStreamPlayers] = useState<Set<string>>(new Set())
+  // Debug: per-player fallback status string shown on each card
+  const [phoneDebug, setPhoneDebug] = useState<Record<string, string>>({})
+  const fallbackFrameCountRef = useRef<Record<string, number>>({})
 
   const isCameraMode = config.captureMode === 'camera'
   const isPhoneMode = config.captureMode === 'phone'
@@ -406,8 +418,15 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
           const { path } = payload as { path: string }
           // Phone confirmed it's in fallback — clear any stale WebRTC stream state so the JPEG renders
           setLiveStreamPlayers(prev => { const s = new Set(prev); s.delete(player.id); return s })
+          const n = (fallbackFrameCountRef.current[player.id] ?? 0) + 1
+          fallbackFrameCountRef.current[player.id] = n
+          setPhoneDebug(prev => ({ ...prev, [player.id]: `frame ${n}: fetching…` }))
           const result = await photoPathToBase64(path)
-          if (!result) return
+          if (!result || result.error) {
+            setPhoneDebug(prev => ({ ...prev, [player.id]: `frame ${n}: fetch failed — ${result?.error ?? 'null result'}` }))
+            return
+          }
+          setPhoneDebug(prev => ({ ...prev, [player.id]: `frame ${n}: OK` }))
           setPlayers(prev =>
             prev.map(p => p.id === player.id ? { ...p, photoDataUrl: result.dataUrl, photoBase64: result.base64 } : p)
           )
@@ -763,6 +782,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
                 videoRef={el => { videoRefs.current[player.id] = el }}
                 cameraError={cameraErrors[player.id]}
                 hasRemoteStream={liveStreamPlayers.has(player.id)}
+                debugStatus={isPhoneMode ? phoneDebug[player.id] : undefined}
               />
             ))}
           </div>
@@ -842,7 +862,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
 }
 
 function PlayerCard({
-  player, index, gameId, isActive, captureMode, cameraLayout, sharedVideoRef, videoRef, cameraError, hasRemoteStream,
+  player, index, gameId, isActive, captureMode, cameraLayout, sharedVideoRef, videoRef, cameraError, hasRemoteStream, debugStatus,
 }: {
   player: Player
   index: number
@@ -855,6 +875,7 @@ function PlayerCard({
   videoRef: (el: HTMLVideoElement | null) => void
   cameraError?: string
   hasRemoteStream?: boolean
+  debugStatus?: string
 }) {
   const color = PLAYER_COLORS[index % PLAYER_COLORS.length]
 
@@ -977,6 +998,11 @@ function PlayerCard({
           )
         )}
       </div>
+      {debugStatus && (
+        <div className={`px-2 py-1 text-[10px] font-mono truncate border-t border-[#E2E8F0] ${debugStatus.includes('failed') ? 'bg-red-50 text-red-600' : debugStatus.includes('OK') ? 'bg-green-50 text-green-700' : 'bg-[#F8FAFC] text-[#94A3B8]'}`}>
+          {debugStatus}
+        </div>
+      )}
     </div>
   )
 }
