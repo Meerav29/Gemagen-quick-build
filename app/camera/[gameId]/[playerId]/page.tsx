@@ -107,12 +107,16 @@ export default function PhoneCameraPage({
     const canvas = canvasRef.current
     if (!video || !canvas || video.readyState < 2) return
 
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
+    // Center-crop to square so capture matches the square preview
+    const size = Math.min(video.videoWidth, video.videoHeight)
+    const sx = (video.videoWidth - size) / 2
+    const sy = (video.videoHeight - size) / 2
+    canvas.width = size
+    canvas.height = size
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    ctx.drawImage(video, 0, 0)
+    ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size)
     const dataUrl = canvas.toDataURL('image/jpeg', 0.8)
     const base64 = dataUrl.split(',')[1]
     const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
@@ -300,7 +304,7 @@ export default function PhoneCameraPage({
 
         {/* Video element always in DOM so ref is available when stream attaches */}
         <div className={status === 'live' ? 'space-y-4' : 'hidden'}>
-          <div className="relative rounded-2xl overflow-hidden bg-black aspect-video">
+          <div className="relative rounded-2xl overflow-hidden bg-black aspect-square">
             <video
               ref={videoRef}
               autoPlay

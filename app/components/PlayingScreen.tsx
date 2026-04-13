@@ -797,7 +797,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
             />
           )}
 
-          <div className={`grid gap-4 h-full ${players.length === 2 ? 'grid-cols-2' : players.length === 3 ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2'}`}>
+          <div className={`grid gap-4 ${players.length === 2 ? 'grid-cols-2' : players.length === 3 ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2'}`}>
             {players.map((player, idx) => (
               <PlayerCard
                 key={player.id}
@@ -944,7 +944,7 @@ function PlayerCard({
       </div>
 
       {/* Content area */}
-      <div className="flex-1 relative min-h-[140px]">
+      <div className="relative aspect-square">
         {captureMode === 'phone' ? (
           cameraError && !player.photoDataUrl ? (
             <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-[#FFF8F8] p-4 text-center">
@@ -953,7 +953,7 @@ function PlayerCard({
             </div>
           ) : player.photoDataUrl && !hasRemoteStream ? (
             // Fallback: show last JPEG from polling
-            <img src={player.photoDataUrl} alt={`${player.name}'s build`} className="w-full h-full object-contain bg-black" />
+            <img src={player.photoDataUrl} alt={`${player.name}'s build`} className="w-full h-full object-cover" />
           ) : (
             // Video element for WebRTC stream (or connecting state)
             <div className="relative w-full h-full bg-[#0F172A]">
