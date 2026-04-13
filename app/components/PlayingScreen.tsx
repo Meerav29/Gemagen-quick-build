@@ -349,6 +349,8 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
         if (state === 'failed' || state === 'disconnected') {
           setCameraErrors(prev => ({ ...prev, [playerId]: 'Connection lost — waiting for fallback' }))
           setActiveStreamCount(c => Math.max(0, c - 1))
+          // Remove PC ref so hasRemoteStream → false and the JPEG fallback renders
+          delete peerConnectionsRef.current[playerId]
         }
         if (state === 'connected') {
           setCameraErrors(prev => { const n = { ...prev }; delete n[playerId]; return n })
