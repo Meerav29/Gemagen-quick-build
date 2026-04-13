@@ -404,6 +404,8 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
         })
         .on('broadcast', { event: 'fallback-frame' }, async ({ payload }) => {
           const { path } = payload as { path: string }
+          // Phone confirmed it's in fallback — clear any stale WebRTC stream state so the JPEG renders
+          setLiveStreamPlayers(prev => { const s = new Set(prev); s.delete(player.id); return s })
           const result = await photoPathToBase64(path)
           if (!result) return
           setPlayers(prev =>
