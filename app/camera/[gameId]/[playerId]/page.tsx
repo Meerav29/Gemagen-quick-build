@@ -2,15 +2,18 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import { createPhonePeerConnection } from '../../../../lib/webrtc'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-const CAPTURE_INTERVAL = 2500 // ms between frame uploads
+// Fallback JPEG polling interval (used only if WebRTC fails)
+const FALLBACK_INTERVAL = 2500
 
 type Status = 'loading' | 'permission' | 'live' | 'error' | 'done'
+type WebRTCState = 'idle' | 'connecting' | 'connected' | 'failed'
 
 export default function PhoneCameraPage({
   params,
@@ -22,14 +25,19 @@ export default function PhoneCameraPage({
   const [status, setStatus] = useState<Status>('loading')
   const [playerName, setPlayerName] = useState<string>('')
   const [errorMsg, setErrorMsg] = useState<string>('')
-  const [frameCount, setFrameCount] = useState(0)
-  const [debugLog, setDebugLog] = useState<string[]>([])
   const [gamePhase, setGamePhase] = useState<string>('waiting')
+  const [webrtcState, setWebrtcState] = useState<WebRTCState>('idle')
+  const [isFallback, setIsFallback] = useState(false)
+  const [fallbackFrames, setFallbackFrames] = useState(0)
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const pcRef = useRef<RTCPeerConnection | null>(null)
+  const signalingChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const webrtcTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const pendingHostCandidatesRef = useRef<RTCIceCandidateInit[]>([])
 
   // Load player name and watch game phase
   useEffect(() => {
@@ -59,7 +67,6 @@ export default function PhoneCameraPage({
 
     load()
 
-    // Watch game phase changes
     const channel = supabase
       .channel(`phone-game-${gameId}`)
       .on(
@@ -69,7 +76,7 @@ export default function PhoneCameraPage({
           const phase = (payload.new as { phase: string }).phase
           setGamePhase(phase)
           if (phase === 'judging' || phase === 'results') {
-            stopCapture()
+            stopAll()
             setStatus('done')
           }
         }
@@ -79,9 +86,130 @@ export default function PhoneCameraPage({
     return () => { supabase.removeChannel(channel) }
   }, [gameId, playerId])
 
-  const stopCapture = () => {
-    if (intervalRef.current) clearInterval(intervalRef.current)
+  const stopAll = () => {
+    // WebRTC teardown
+    clearTimeout(webrtcTimeoutRef.current!)
+    pcRef.current?.close()
+    pcRef.current = null
+    if (signalingChannelRef.current) {
+      supabase.removeChannel(signalingChannelRef.current)
+      signalingChannelRef.current = null
+    }
+    // Fallback interval
+    clearInterval(intervalRef.current!)
+    // Camera stream
     streamRef.current?.getTracks().forEach(t => t.stop())
+  }
+
+  // Fallback: JPEG upload polling
+  const captureAndUpload = async () => {
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    if (!video || !canvas || video.readyState < 2) return
+
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    ctx.drawImage(video, 0, 0)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.8)
+    const base64 = dataUrl.split(',')[1]
+    const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
+    const path = `${gameId}/${playerId}.jpg`
+
+    const { error } = await supabase.storage
+      .from('player-photos')
+      .upload(path, bytes, { contentType: 'image/jpeg', upsert: true })
+
+    if (!error) {
+      await supabase.from('players').update({ photo_path: path }).eq('id', playerId)
+      setFallbackFrames(c => c + 1)
+    }
+  }
+
+  const triggerFallback = async () => {
+    clearTimeout(webrtcTimeoutRef.current!)
+    pcRef.current?.close()
+    pcRef.current = null
+    if (signalingChannelRef.current) {
+      supabase.removeChannel(signalingChannelRef.current)
+      signalingChannelRef.current = null
+    }
+    await supabase.from('players').update({ webrtc_state: 'fallback' }).eq('id', playerId)
+    setWebrtcState('failed')
+    setIsFallback(true)
+    captureAndUpload()
+    intervalRef.current = setInterval(captureAndUpload, FALLBACK_INTERVAL)
+  }
+
+  const startWebRTC = async (stream: MediaStream) => {
+    const channel = supabase.channel(`webrtc-${gameId}-${playerId}`)
+    signalingChannelRef.current = channel
+
+    const pc = createPhonePeerConnection(stream, (candidate) => {
+      channel.send({
+        type: 'broadcast',
+        event: 'ice-candidate-phone',
+        payload: candidate.toJSON(),
+      })
+    })
+    pcRef.current = pc
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState
+      if (state === 'connected') {
+        clearTimeout(webrtcTimeoutRef.current!)
+        setWebrtcState('connected')
+        supabase.from('players').update({ webrtc_state: 'connected' }).eq('id', playerId)
+      }
+      if (state === 'failed' || state === 'disconnected') {
+        triggerFallback()
+      }
+    }
+
+    channel
+      .on('broadcast', { event: 'answer' }, async ({ payload }) => {
+        if (!pc.remoteDescription) {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(payload))
+            // Flush any queued host ICE candidates
+            for (const c of pendingHostCandidatesRef.current) {
+              await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {})
+            }
+            pendingHostCandidatesRef.current = []
+          } catch { /* ignore */ }
+        }
+      })
+      .on('broadcast', { event: 'ice-candidate-host' }, async ({ payload }) => {
+        if (pc.remoteDescription) {
+          await pc.addIceCandidate(new RTCIceCandidate(payload)).catch(() => {})
+        } else {
+          pendingHostCandidatesRef.current.push(payload)
+        }
+      })
+      .subscribe(async (subscribeStatus) => {
+        if (subscribeStatus !== 'SUBSCRIBED') return
+        try {
+          const offer = await pc.createOffer()
+          await pc.setLocalDescription(offer)
+          await channel.send({
+            type: 'broadcast',
+            event: 'offer',
+            payload: { type: offer.type, sdp: offer.sdp },
+          })
+          setWebrtcState('connecting')
+
+          // Fallback if no connection within 15s
+          webrtcTimeoutRef.current = setTimeout(() => {
+            if (pc.connectionState !== 'connected') triggerFallback()
+          }, 15000)
+        } catch {
+          triggerFallback()
+        }
+      })
+
+    await supabase.from('players').update({ webrtc_state: 'connecting' }).eq('id', playerId)
   }
 
   const startCamera = async () => {
@@ -96,7 +224,7 @@ export default function PhoneCameraPage({
         await videoRef.current.play()
       }
       setStatus('live')
-      startCapturing()
+      await startWebRTC(stream)
     } catch (err) {
       const domErr = err as DOMException
       if (domErr.name === 'NotAllowedError') {
@@ -110,50 +238,19 @@ export default function PhoneCameraPage({
     }
   }
 
-  const log = (msg: string) => setDebugLog(prev => [...prev.slice(-6), msg])
-
-  const captureAndUpload = async () => {
-    const video = videoRef.current
-    const canvas = canvasRef.current
-    if (!video || !canvas) { log('no video/canvas ref'); return }
-    if (video.readyState < 2) { log(`video not ready (state=${video.readyState})`); return }
-
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    const ctx = canvas.getContext('2d')
-    if (!ctx) { log('no canvas ctx'); return }
-
-    ctx.drawImage(video, 0, 0)
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.8)
-    const base64 = dataUrl.split(',')[1]
-    const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
-    const path = `${gameId}/${playerId}.jpg`
-
-    log(`uploading ${Math.round(bytes.length / 1024)}kb…`)
-    const { error } = await supabase.storage
-      .from('player-photos')
-      .upload(path, bytes, { contentType: 'image/jpeg', upsert: true })
-
-    if (error) {
-      log(`upload error: ${error.message}`)
-    } else {
-      const { error: dbErr } = await supabase.from('players').update({ photo_path: path }).eq('id', playerId)
-      if (dbErr) log(`db error: ${dbErr.message}`)
-      else setFrameCount(c => c + 1)
-    }
-  }
-
-  const startCapturing = () => {
-    captureAndUpload() // immediate first frame
-    intervalRef.current = setInterval(captureAndUpload, CAPTURE_INTERVAL)
-  }
-
   // Cleanup on unmount
   useEffect(() => {
-    return () => stopCapture()
+    return () => stopAll()
   }, [])
 
   const isPlaying = gamePhase === 'playing'
+
+  const webrtcBadge = {
+    idle:       { label: 'Starting…',   color: 'text-white/40' },
+    connecting: { label: 'Connecting…', color: 'text-yellow-400' },
+    connected:  { label: 'Live',        color: 'text-green-400' },
+    failed:     { label: 'Fallback',    color: 'text-orange-400' },
+  }[webrtcState]
 
   return (
     <div className="min-h-screen bg-[#0F172A] flex flex-col items-center justify-center px-6 py-10 text-white">
@@ -199,7 +296,7 @@ export default function PhoneCameraPage({
           </div>
         )}
 
-        {/* Video element always in DOM so ref is available before status='live' */}
+        {/* Video element always in DOM so ref is available when stream attaches */}
         <div className={status === 'live' ? 'space-y-4' : 'hidden'}>
           <div className="relative rounded-2xl overflow-hidden bg-black aspect-video">
             <video
@@ -210,27 +307,23 @@ export default function PhoneCameraPage({
               className="w-full h-full object-cover"
             />
             <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-full">
-              <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+              <span className={`w-2 h-2 rounded-full animate-pulse ${webrtcState === 'connected' ? 'bg-red-500' : 'bg-yellow-500'}`} />
               <span className="text-xs font-semibold text-white">LIVE</span>
             </div>
           </div>
 
           <div className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex items-center justify-between">
-            <span className="text-sm text-white/60">Frames sent</span>
-            <span className="text-sm font-bold text-white tabular-nums">{frameCount}</span>
+            <span className="text-sm text-white/60">
+              {isFallback ? 'Frames sent' : 'Connection'}
+            </span>
+            <span className={`text-sm font-bold tabular-nums ${webrtcBadge.color}`}>
+              {isFallback ? fallbackFrames : webrtcBadge.label}
+            </span>
           </div>
 
           <p className="text-center text-xs text-white/30">
-            Uploading every {CAPTURE_INTERVAL / 1000}s · keep this tab open
+            {isFallback ? `Uploading every ${FALLBACK_INTERVAL / 1000}s · keep this tab open` : 'Streaming live · keep this tab open'}
           </p>
-
-          {debugLog.length > 0 && (
-            <div className="bg-black/40 rounded-xl p-3 space-y-1">
-              {debugLog.map((line, i) => (
-                <p key={i} className="text-xs text-white/50 font-mono">{line}</p>
-              ))}
-            </div>
-          )}
         </div>
 
         {status === 'error' && (

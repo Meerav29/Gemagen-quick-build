@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { CommentaryEntry, Player } from '../types'
 import { CaptureMode, CameraLayout, GameConfigExtended } from '../types-extended'
 import { supabase } from '../../lib/supabase'
+import { createHostPeerConnection } from '../../lib/webrtc'
 
 interface PlayingScreenProps {
   config: GameConfigExtended
@@ -108,6 +109,11 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
   const streamRefs = useRef<Record<string, MediaStream | null>>({})
   const sharedVideoRef = useRef<HTMLVideoElement | null>(null)
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  // Phone WebRTC refs
+  const peerConnectionsRef = useRef<Record<string, RTCPeerConnection>>({})
+  const signalingChannelsRef = useRef<Record<string, ReturnType<typeof supabase.channel>>>({})
+  const pendingPhoneCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({})
 
   const isCameraMode = config.captureMode === 'camera'
   const isPhoneMode = config.captureMode === 'phone'
@@ -280,7 +286,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
             supabase.from('games').update({ phase: 'judging' }).eq('id', gameId)
             setTimeout(() => {
               setPlayers(curr => {
-                const finalPlayers = isCameraMode ? buildPlayersWithFrames(curr) : curr
+                const finalPlayers = (isCameraMode || isPhoneMode) ? buildPlayersWithFrames(curr) : curr
                 onTimeUp(finalPlayers)
                 return curr
               })
@@ -294,9 +300,9 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
     return () => clearInterval(timerRef.current!)
   }, [gameStarted, gameId, onTimeUp, isCameraMode, buildPlayersWithFrames])
 
-  // Upload + phone mode: Supabase Realtime — watch for player photo uploads
+  // Upload mode: watch for photo uploads via Realtime
   useEffect(() => {
-    if (isCameraMode) return
+    if (isCameraMode || isPhoneMode) return
     const channel = supabase
       .channel(`players-${gameId}`)
       .on(
@@ -314,15 +320,164 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
       )
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [gameId, isCameraMode])
+  }, [gameId, isCameraMode, isPhoneMode])
 
-  const speakCommentary = useCallback((text: string) => {
-    if (!ttsEnabled || typeof window === 'undefined' || !window.speechSynthesis) return
-    window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.rate = 1.05
-    utterance.pitch = 1.0
-    window.speechSynthesis.speak(utterance)
+  // Phone mode: WebRTC signaling via Supabase broadcast channels
+  const handleOffer = useCallback(async (playerId: string, offerSdp: { type: RTCSdpType; sdp: string }) => {
+    if (!pendingPhoneCandidatesRef.current[playerId]) {
+      pendingPhoneCandidatesRef.current[playerId] = []
+    }
+
+    const pc = createHostPeerConnection(
+      (stream) => {
+        // Remote stream arrived — attach to the player's video element
+        const video = videoRefs.current[playerId]
+        if (video) {
+          video.srcObject = stream
+          video.play().catch(() => {})
+        }
+        setActiveStreamCount(c => c + 1)
+      },
+      (candidate) => {
+        signalingChannelsRef.current[playerId]?.send({
+          type: 'broadcast',
+          event: 'ice-candidate-host',
+          payload: candidate.toJSON(),
+        })
+      },
+      (state) => {
+        if (state === 'failed' || state === 'disconnected') {
+          setCameraErrors(prev => ({ ...prev, [playerId]: 'Connection lost — waiting for fallback' }))
+          setActiveStreamCount(c => Math.max(0, c - 1))
+        }
+        if (state === 'connected') {
+          setCameraErrors(prev => { const n = { ...prev }; delete n[playerId]; return n })
+        }
+      }
+    )
+    peerConnectionsRef.current[playerId] = pc
+
+    await pc.setRemoteDescription(new RTCSessionDescription(offerSdp))
+    const answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+
+    await signalingChannelsRef.current[playerId]?.send({
+      type: 'broadcast',
+      event: 'answer',
+      payload: { type: answer.type, sdp: answer.sdp },
+    })
+
+    // Flush any ICE candidates that arrived before the answer was ready
+    for (const c of pendingPhoneCandidatesRef.current[playerId] ?? []) {
+      await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {})
+    }
+    pendingPhoneCandidatesRef.current[playerId] = []
+  }, [])
+
+  useEffect(() => {
+    if (!isPhoneMode) return
+
+    // Open one signaling channel per player
+    config.players.forEach(player => {
+      const channel = supabase.channel(`webrtc-${gameId}-${player.id}`)
+      signalingChannelsRef.current[player.id] = channel
+
+      channel
+        .on('broadcast', { event: 'offer' }, ({ payload }) => {
+          handleOffer(player.id, payload).catch(console.error)
+        })
+        .on('broadcast', { event: 'ice-candidate-phone' }, async ({ payload }) => {
+          const pc = peerConnectionsRef.current[player.id]
+          if (pc?.remoteDescription) {
+            await pc.addIceCandidate(new RTCIceCandidate(payload)).catch(() => {})
+          } else {
+            if (!pendingPhoneCandidatesRef.current[player.id]) {
+              pendingPhoneCandidatesRef.current[player.id] = []
+            }
+            pendingPhoneCandidatesRef.current[player.id].push(payload)
+          }
+        })
+        .subscribe()
+    })
+
+    return () => {
+      Object.values(signalingChannelsRef.current).forEach(ch => supabase.removeChannel(ch))
+      Object.values(peerConnectionsRef.current).forEach(pc => pc.close())
+      signalingChannelsRef.current = {}
+      peerConnectionsRef.current = {}
+      pendingPhoneCandidatesRef.current = {}
+      setActiveStreamCount(0)
+    }
+  }, [isPhoneMode, gameId, config.players, handleOffer])
+
+  // Phone mode fallback: watch for JPEG uploads from phones that couldn't establish WebRTC
+  useEffect(() => {
+    if (!isPhoneMode) return
+    const channel = supabase
+      .channel(`fallback-photos-${gameId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'players', filter: `game_id=eq.${gameId}` },
+        async (payload) => {
+          const { id, photo_path, webrtc_state } = payload.new as {
+            id: string; photo_path: string | null; webrtc_state: string
+          }
+          if (webrtc_state !== 'fallback' || !photo_path) return
+          const result = await photoPathToBase64(photo_path)
+          if (!result) return
+          setPlayers(prev =>
+            prev.map(p => p.id === id ? { ...p, photoDataUrl: result.dataUrl, photoBase64: result.base64 } : p)
+          )
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [isPhoneMode, gameId])
+
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const currentAudioSourceRef = useRef<AudioBufferSourceNode | null>(null)
+
+  const speakCommentary = useCallback(async (text: string) => {
+    if (!ttsEnabled) return
+    try {
+      // Stop any currently playing audio
+      currentAudioSourceRef.current?.stop()
+      currentAudioSourceRef.current = null
+
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+      if (!res.ok) return
+      const { audio } = await res.json()
+      if (!audio) return
+
+      // Decode base64 PCM (16-bit signed, 24kHz, mono)
+      const binary = atob(audio)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+
+      const SAMPLE_RATE = 24000
+      const numSamples = bytes.length / 2
+      const ctx = audioContextRef.current ?? new AudioContext({ sampleRate: SAMPLE_RATE })
+      audioContextRef.current = ctx
+
+      const buffer = ctx.createBuffer(1, numSamples, SAMPLE_RATE)
+      const channelData = buffer.getChannelData(0)
+      const view = new DataView(bytes.buffer)
+      for (let i = 0; i < numSamples; i++) {
+        channelData[i] = view.getInt16(i * 2, true) / 32768
+      }
+
+      const source = ctx.createBufferSource()
+      source.buffer = buffer
+      source.connect(ctx.destination)
+      source.start()
+      currentAudioSourceRef.current = source
+    } catch (e) {
+      console.error('TTS playback error:', e)
+    }
   }, [ttsEnabled])
 
   const fetchCommentary = useCallback(async (currentPlayers: Player[]) => {
@@ -368,7 +523,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
   useEffect(() => {
     if (!gameStarted) return
     commentaryTimerRef.current = setInterval(() => {
-      if (isCameraMode) {
+      if (isCameraMode || isPhoneMode) {
         setPlayers(curr => {
           const withFrames = buildPlayersWithFrames(curr)
           fetchCommentary(withFrames)
@@ -383,7 +538,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
   }, [gameStarted, fetchCommentary, isCameraMode, buildPlayersWithFrames, pushFramesToSupabase])
 
   const handleManualCommentary = () => {
-    if (isCameraMode) {
+    if (isCameraMode || isPhoneMode) {
       const withFrames = buildPlayersWithFrames(players)
       fetchCommentary(withFrames)
     } else {
@@ -392,7 +547,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
   }
 
   const commentaryButtonDisabled = isLoadingCommentary ||
-    (!isCameraMode && players.every(p => !p.photoBase64))
+    (!isCameraMode && !isPhoneMode && players.every(p => !p.photoBase64))
 
   const progress = timeLeft / config.timerSeconds
   const radius = 50
@@ -485,7 +640,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
             </div>
             <div className="flex items-center gap-3">
               <span className="text-xs opacity-60">
-                {players.filter(p => p.photoBase64).length}/{players.length} live
+                {isPhoneMode ? activeStreamCount : players.filter(p => p.photoBase64).length}/{players.length} live
               </span>
               <button
                 onClick={() => setJoinPanelOpen(o => !o)}
@@ -518,7 +673,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
                             style={{ background: PLAYER_COLORS[i] }}
                           >{i + 1}</span>
                           <span className={`text-xs font-semibold ${p.photoBase64 ? 'text-[#86EFAC]' : 'text-white/70'}`}>
-                            {p.name}{p.photoBase64 ? ' ✓' : ''}
+                            {p.name}{p.photoBase64 ? ' ✓' : p.photoDataUrl ? ' ↻' : ''}
                           </span>
                         </div>
                       </div>
@@ -591,6 +746,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
                 sharedVideoRef={isSharedCamera ? sharedVideoRef : undefined}
                 videoRef={el => { videoRefs.current[player.id] = el }}
                 cameraError={cameraErrors[player.id]}
+                hasRemoteStream={!!peerConnectionsRef.current[player.id]}
               />
             ))}
           </div>
@@ -606,7 +762,10 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
               </span>
               <button
                 onClick={() => {
-                  if (ttsEnabled) window.speechSynthesis?.cancel()
+                  if (ttsEnabled) {
+                    currentAudioSourceRef.current?.stop()
+                    currentAudioSourceRef.current = null
+                  }
                   setTtsEnabled(e => !e)
                 }}
                 title={ttsEnabled ? 'Mute voice' : 'Unmute voice'}
@@ -667,7 +826,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
 }
 
 function PlayerCard({
-  player, index, gameId, isActive, captureMode, cameraLayout, sharedVideoRef, videoRef, cameraError,
+  player, index, gameId, isActive, captureMode, cameraLayout, sharedVideoRef, videoRef, cameraError, hasRemoteStream,
 }: {
   player: Player
   index: number
@@ -679,6 +838,7 @@ function PlayerCard({
   sharedVideoRef?: React.RefObject<HTMLVideoElement | null>
   videoRef: (el: HTMLVideoElement | null) => void
   cameraError?: string
+  hasRemoteStream?: boolean
 }) {
   const color = PLAYER_COLORS[index % PLAYER_COLORS.length]
 
@@ -704,19 +864,42 @@ function PlayerCard({
             ready
           </span>
         )}
-        {captureMode === 'camera' && !cameraError && (
+        {(captureMode === 'camera' && !cameraError) || (captureMode === 'phone' && hasRemoteStream) ? (
           <span className="ml-auto flex items-center gap-1 text-xs font-medium flex-shrink-0" style={{ color }}>
             <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
               <circle cx="6" cy="6" r="3" />
             </svg>
             live
           </span>
-        )}
+        ) : captureMode === 'phone' && !hasRemoteStream && !player.photoDataUrl ? (
+          <span className="ml-auto text-xs text-[#94A3B8]">waiting…</span>
+        ) : null}
       </div>
 
       {/* Content area */}
       <div className="flex-1 relative min-h-[140px]">
-        {captureMode === 'camera' ? (
+        {captureMode === 'phone' ? (
+          cameraError && !player.photoDataUrl ? (
+            <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-[#FFF8F8] p-4 text-center">
+              <CameraOffIcon className="w-8 h-8 text-[#DC2626]" />
+              <p className="text-xs text-[#DC2626]">{cameraError}</p>
+            </div>
+          ) : player.photoDataUrl && !hasRemoteStream ? (
+            // Fallback: show last JPEG from polling
+            <img src={player.photoDataUrl} alt={`${player.name}'s build`} className="w-full h-full object-cover" />
+          ) : (
+            // Video element for WebRTC stream (or connecting state)
+            <div className="relative w-full h-full bg-[#0F172A]">
+              <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+              {!hasRemoteStream && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+                  <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <p className="text-xs text-white/50">Connecting…</p>
+                </div>
+              )}
+            </div>
+          )
+        ) : captureMode === 'camera' ? (
           cameraError ? (
             <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-[#FFF8F8] p-4 text-center">
               <CameraOffIcon className="w-8 h-8 text-[#DC2626]" />
