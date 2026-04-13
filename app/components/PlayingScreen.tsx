@@ -114,6 +114,8 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
   const peerConnectionsRef = useRef<Record<string, RTCPeerConnection>>({})
   const signalingChannelsRef = useRef<Record<string, ReturnType<typeof supabase.channel>>>({})
   const pendingPhoneCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({})
+  // Tracks which players have an active media stream flowing (not just a signaled PC)
+  const [liveStreamPlayers, setLiveStreamPlayers] = useState<Set<string>>(new Set())
 
   const isCameraMode = config.captureMode === 'camera'
   const isPhoneMode = config.captureMode === 'phone'
@@ -336,6 +338,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
           video.srcObject = stream
           video.play().catch(() => {})
         }
+        setLiveStreamPlayers(prev => new Set(prev).add(playerId))
         setActiveStreamCount(c => c + 1)
       },
       (candidate) => {
@@ -348,8 +351,8 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
       (state) => {
         if (state === 'failed' || state === 'disconnected') {
           setCameraErrors(prev => ({ ...prev, [playerId]: 'Connection lost — waiting for fallback' }))
+          setLiveStreamPlayers(prev => { const s = new Set(prev); s.delete(playerId); return s })
           setActiveStreamCount(c => Math.max(0, c - 1))
-          // Remove PC ref so hasRemoteStream → false and the JPEG fallback renders
           delete peerConnectionsRef.current[playerId]
         }
         if (state === 'connected') {
@@ -409,6 +412,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
       peerConnectionsRef.current = {}
       pendingPhoneCandidatesRef.current = {}
       setActiveStreamCount(0)
+      setLiveStreamPlayers(new Set())
     }
   }, [isPhoneMode, gameId, config.players, handleOffer])
 
@@ -748,7 +752,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
                 sharedVideoRef={isSharedCamera ? sharedVideoRef : undefined}
                 videoRef={el => { videoRefs.current[player.id] = el }}
                 cameraError={cameraErrors[player.id]}
-                hasRemoteStream={!!peerConnectionsRef.current[player.id]}
+                hasRemoteStream={liveStreamPlayers.has(player.id)}
               />
             ))}
           </div>
