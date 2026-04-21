@@ -813,6 +813,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
                 cameraError={cameraErrors[player.id]}
                 hasRemoteStream={liveStreamPlayers.has(player.id)}
                 debugStatus={isPhoneMode ? phoneDebug[player.id] : undefined}
+                phoneUrl={isPhoneMode && origin ? `${origin}/camera/${gameId}/${player.id}` : undefined}
               />
             ))}
           </div>
@@ -892,7 +893,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
 }
 
 function PlayerCard({
-  player, index, gameId, isActive, captureMode, cameraLayout, sharedVideoRef, videoRef, cameraError, hasRemoteStream, debugStatus,
+  player, index, gameId, isActive, captureMode, cameraLayout, sharedVideoRef, videoRef, cameraError, hasRemoteStream, debugStatus, phoneUrl,
 }: {
   player: Player
   index: number
@@ -906,6 +907,7 @@ function PlayerCard({
   cameraError?: string
   hasRemoteStream?: boolean
   debugStatus?: string
+  phoneUrl?: string
 }) {
   const color = PLAYER_COLORS[index % PLAYER_COLORS.length]
 
@@ -955,13 +957,26 @@ function PlayerCard({
             // Fallback: show last JPEG from polling
             <img src={player.photoDataUrl} alt={`${player.name}'s build`} className="w-full h-full object-cover" />
           ) : (
-            // Video element for WebRTC stream (or connecting state)
+            // Video element for WebRTC stream (or waiting-for-phone state with QR)
             <div className="relative w-full h-full bg-[#0F172A]">
               <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
               {!hasRemoteStream && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-                  <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <p className="text-xs text-white/50">Connecting…</p>
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4">
+                  {phoneUrl ? (
+                    <>
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(phoneUrl)}&size=200x200&bgcolor=0F172A&color=ffffff&margin=6`}
+                        alt="Scan to connect phone camera"
+                        className="rounded-xl w-4/5 max-w-[200px]"
+                      />
+                      <p className="text-[10px] text-white/50 text-center">Scan to connect camera</p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <p className="text-xs text-white/50">Connecting…</p>
+                    </>
+                  )}
                 </div>
               )}
             </div>
