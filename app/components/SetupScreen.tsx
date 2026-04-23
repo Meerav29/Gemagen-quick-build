@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { BuildType, Player } from '../types'
 import { CaptureMode, CameraLayout, GameConfigExtended } from '../types-extended'
+import { PERSONAS, DEFAULT_PERSONA_ID, PersonaId } from '../lib/personas'
 
 interface SetupScreenProps {
   onStart: (config: GameConfigExtended) => void
@@ -98,6 +99,17 @@ function UploadIcon({ className = 'w-4 h-4' }: { className?: string }) {
   )
 }
 
+function MicIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <rect x="7" y="2" width="6" height="9" rx="3" />
+      <path d="M4 10a6 6 0 0012 0" strokeLinecap="round" />
+      <line x1="10" y1="16" x2="10" y2="19" strokeLinecap="round" />
+      <line x1="7" y1="19" x2="13" y2="19" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export default function SetupScreen({ onStart }: SetupScreenProps) {
   const [buildType, setBuildType] = useState<BuildType>('lego')
   const [challenge, setChallenge] = useState('')
@@ -105,6 +117,8 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
   const [timerSeconds, setTimerSeconds] = useState(90)
   const [playerNames, setPlayerNames] = useState(['', '', '', ''])
   const [playerCount, setPlayerCount] = useState(3)
+
+  const [personaId, setPersonaId] = useState<PersonaId>(DEFAULT_PERSONA_ID)
 
   // Capture mode state
   const [captureMode, setCaptureMode] = useState<CaptureMode>('upload')
@@ -219,6 +233,7 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
       captureMode,
       cameraLayout: captureMode === 'camera' ? cameraLayout : 'shared',
       cameraAssignments: cameraAssignmentsList,
+      personaId,
     })
   }
 
@@ -325,6 +340,22 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Commentator Persona */}
+          <div className="card p-5">
+            <label className="flex items-center gap-2 text-xs font-semibold text-[#64748B] uppercase tracking-wider mb-3">
+              <MicIcon /> Commentator Persona
+            </label>
+            <select
+              value={personaId}
+              onChange={e => setPersonaId(e.target.value as PersonaId)}
+              className="w-full bg-white border border-[#E2E8F0] rounded-lg px-3 py-2.5 text-sm text-[#0F172A] focus:outline-none focus:border-[#1B3A6B] focus:ring-2 focus:ring-[#EEF3FB] transition-colors"
+            >
+              {PERSONAS.map(p => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </select>
           </div>
 
           {/* Capture Mode */}
