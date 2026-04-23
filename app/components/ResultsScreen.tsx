@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { GameConfig, JudgingResult, Player } from '../types'
+import { useState, useEffect, useRef } from 'react'
+import { JudgingResult, Player } from '../types'
+import { GameConfigExtended } from '../types-extended'
 
 interface ResultsScreenProps {
-  config: GameConfig
+  config: GameConfigExtended
   players: Player[]
   result: JudgingResult
   onPlayAgain: () => void
@@ -41,13 +42,60 @@ function RefreshIcon({ className = 'w-4 h-4' }: { className?: string }) {
   )
 }
 
+const SAMPLE_RATE = 24000
+
 export default function ResultsScreen({ config, players, result, onPlayAgain }: ResultsScreenProps) {
   const [phase, setPhase] = useState<'announcement' | 'scores' | 'winner'>('announcement')
   const [scriptIndex, setScriptIndex] = useState(0)
   const [showWinner, setShowWinner] = useState(false)
   const [confetti, setConfetti] = useState<{ id: number; x: number; color: string; size: number; duration: number; delay: number }[]>([])
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const audioSourceRef = useRef<AudioBufferSourceNode | null>(null)
 
   const scriptWords = result.winnerAnnouncementScript.split(' ')
+
+  useEffect(() => {
+    const speak = async () => {
+      try {
+        const res = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: result.winnerAnnouncementScript }),
+        })
+        if (!res.ok) return
+        const { audio } = await res.json()
+        if (!audio) return
+
+        const binary = atob(audio)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+
+        const ctx = audioContextRef.current ?? new AudioContext({ sampleRate: SAMPLE_RATE })
+        audioContextRef.current = ctx
+
+        const numSamples = bytes.length / 2
+        const buffer = ctx.createBuffer(1, numSamples, SAMPLE_RATE)
+        const channelData = buffer.getChannelData(0)
+        const view = new DataView(bytes.buffer)
+        for (let i = 0; i < numSamples; i++) {
+          channelData[i] = view.getInt16(i * 2, true) / 32768
+        }
+
+        const source = ctx.createBufferSource()
+        source.buffer = buffer
+        source.connect(ctx.destination)
+        source.start()
+        audioSourceRef.current = source
+      } catch (e) {
+        console.error('Results TTS error:', e)
+      }
+    }
+    speak()
+    return () => {
+      audioSourceRef.current?.stop()
+      audioSourceRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
     if (phase !== 'announcement') return
@@ -55,7 +103,7 @@ export default function ResultsScreen({ config, players, result, onPlayAgain }: 
       setTimeout(() => setPhase('scores'), 1500)
       return
     }
-    const delay = scriptIndex === 0 ? 800 : 120
+    const delay = scriptIndex === 0 ? 800 : 60
     const t = setTimeout(() => setScriptIndex(prev => prev + 1), delay)
     return () => clearTimeout(t)
   }, [phase, scriptIndex, scriptWords.length])

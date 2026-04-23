@@ -12,7 +12,7 @@ interface PlayingScreenProps {
   onTimeUp: (updatedPlayers: Player[]) => void
 }
 
-const COMMENTARY_INTERVAL = 18000
+const COMMENTARY_INTERVAL = 13000
 const PLAYER_COLORS = ['#1B3A6B', '#2563EB', '#0891B2', '#7C3AED']
 
 function MicIcon({ className = 'w-4 h-4' }: { className?: string }) {
