@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getPersona, DEFAULT_PERSONA_ID } from '../../lib/personas'
 
 const VERTEX_API_KEY = process.env.VERTEX_API_KEY
 const VERTEX_MODEL = process.env.VERTEX_MODEL ?? 'gemini-2.5-flash'
@@ -6,14 +7,12 @@ const VERTEX_URL = `https://aiplatform.googleapis.com/v1/publishers/google/model
 
 export async function POST(req: NextRequest) {
   try {
-    const { players, challenge, buildType, previousComments } = await req.json()
+    const { players, challenge, buildType, previousComments, personaId } = await req.json()
 
     const buildDesc = buildType === 'lego' ? 'LEGO brick sculpture' : 'drawing'
-    const persona = buildType === 'lego'
-      ? 'witty, enthusiastic game show commentator who loves LEGO'
-      : 'playful art critic who takes drawings very seriously (maybe too seriously)'
+    const persona = getPersona(personaId ?? DEFAULT_PERSONA_ID)
 
-    const promptText = `You are a ${persona} at a high-stakes quick build contest — talk like a hype man at a live event, NOT a formal announcer. Use short punchy sentences. Slang is fine. "Oh wow", "okay okay", "I'm not sure about that..." NEVER use formal language. Keep it conversational, like you're texting a friend.
+    const promptText = `${persona.commentaryPrompt}
 
 Players have ${buildType === 'lego' ? '90' : '60'} seconds to build a "${challenge}" as a ${buildDesc}.
 

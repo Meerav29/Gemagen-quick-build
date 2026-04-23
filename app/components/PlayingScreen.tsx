@@ -546,6 +546,7 @@ export default function PlayingScreen({ config, gameId, onTimeUp }: PlayingScree
           players: playersWithPhotos,
           challenge: config.challenge,
           buildType: config.buildType,
+          personaId: config.personaId,
           previousComments: previousCommentsRef.current,
         }),
       })
