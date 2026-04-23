@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
         responseModalities: ['AUDIO'],
         speechConfig: {
           voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Charon' },
+            prebuiltVoiceConfig: { voiceName: 'Puck' },
           },
         },
       },
