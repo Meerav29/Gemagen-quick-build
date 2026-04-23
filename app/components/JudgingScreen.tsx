@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { GameConfig, JudgingResult, Player } from '../types'
+import { JudgingResult, Player } from '../types'
+import { GameConfigExtended } from '../types-extended'
 import { supabase } from '../../lib/supabase'
 
 interface JudgingScreenProps {
-  config: GameConfig
+  config: GameConfigExtended
   gameId: string
   players: Player[]
   onComplete: (result: JudgingResult) => void
@@ -64,6 +65,7 @@ export default function JudgingScreen({ config, gameId, players, onComplete }: J
             players,
             challenge: config.challenge,
             buildType: config.buildType,
+            personaId: config.personaId,
           }),
         })
         const data = await res.json()

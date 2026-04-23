@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getPersona, DEFAULT_PERSONA_ID } from '../../lib/personas'
 
 const VERTEX_API_KEY = process.env.VERTEX_API_KEY
 const VERTEX_MODEL = process.env.VERTEX_MODEL ?? 'gemini-2.5-flash'
@@ -6,9 +7,10 @@ const VERTEX_URL = `https://aiplatform.googleapis.com/v1/publishers/google/model
 
 export async function POST(req: NextRequest) {
   try {
-    const { players, challenge, buildType } = await req.json()
+    const { players, challenge, buildType, personaId } = await req.json()
 
     const buildDesc = buildType === 'lego' ? 'LEGO brick sculpture' : 'drawing'
+    const persona = getPersona(personaId ?? DEFAULT_PERSONA_ID)
 
     const activePlayers = players.filter((p: { photoBase64: string | null }) => p.photoBase64)
 
@@ -17,7 +19,8 @@ export async function POST(req: NextRequest) {
       return `"player_${i + 1}": { "playerName": "${p.name}", "playerNumber": ${i + 1}, "score": number(1-10), "scoringReasoning": string, "colorScore": number(1-10), "structureScore": number(1-10), "adherenceScore": number(1-10), "detailScore": number(1-10) }`
     }).join(', ')
 
-    const promptText = `You are the head judge of a high-stakes quick build contest.
+    const promptText = `${persona.judgePrompt}
+
 Players had limited time to build "${challenge}" as a ${buildDesc}.
 
 Evaluate each player's build on a scale of 1–10 across these criteria:
