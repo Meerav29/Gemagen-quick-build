@@ -1,7 +1,7 @@
 # Quick Build — Claude Instructions
 
 ## What This Is
-A Next.js game show app for IST 130 (AI & Art). Players race a timer to build something (LEGO or drawing), upload photos mid-game, and an AI judge scores each build and picks a winner. There's a separate audience view meant for a projector screen.
+A Next.js game show app for IST 130 (AI & Art) at Penn State. Players race a timer to build something (LEGO or drawing). An AI judge scores each build and picks a winner, with live commentary during play. A separate audience view is meant for a projector screen.
 
 ## Commands
 ```bash
@@ -10,17 +10,16 @@ npm run build    # Production build
 npm run start    # Run production build
 ```
 
-## Environment
-Requires `ANTHROPIC_API_KEY` in `.env.local`. The app will break at the judging/commentary steps without it.
+New to this repo? Run the `/handoff` slash command to verify your environment is set up correctly and see current known issues.
 
-## Architecture at a Glance
-- `app/page.tsx` — root game state machine, manages phase transitions
-- `app/components/` — one component per game phase (Setup, Playing, Judging, Results)
-- `app/components/AudienceView.tsx` — projector screen, reads from localStorage
-- `app/audience/page.tsx` — thin wrapper that renders AudienceView at `/audience`
-- `app/api/commentary/route.ts` — live commentary during play (calls Claude with images)
-- `app/api/judge/route.ts` — final judging after time expires (calls Claude with images)
-- `app/types.ts` — all shared TypeScript types
+## Environment
+Requires `VERTEX_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `.env.local`. See [SETUP.md](SETUP.md) for how to get these values. The app calls Vertex AI (Gemini) directly via `fetch` — there is no Anthropic/Claude API dependency despite the "Claude Instructions" filename convention.
+
+## Architecture
+Full architecture, API routes, data model, and Supabase schema live in [docs/system-architecture.md](docs/system-architecture.md) — **update that file, not this one**, when architecture changes. This file only holds conventions and guardrails that apply regardless of architecture.
+
+## Known Issues
+Current known bugs and in-progress work are tracked in [docs/pending-tasks.md](docs/pending-tasks.md). Check it before starting new work — it may already describe what you're about to hit.
 
 ## Code Conventions
 - **No new dependencies** without discussing first. The project intentionally has a minimal dep tree.
@@ -29,20 +28,6 @@ Requires `ANTHROPIC_API_KEY` in `.env.local`. The app will break at the judging/
 - **No dark mode** — the app uses a white/navy theme. Do not reintroduce dark backgrounds.
 - **Player colors** — always use the canonical array `['#1B3A6B', '#2563EB', '#0891B2', '#7C3AED']` for player color assignment, indexed by player position.
 
-## State Flow
-```
-setup → playing → judging → results → (setup again)
-```
-State lives in `page.tsx`. The audience view is synced via `localStorage` key `quickbuild_audience` — `broadcastState()` writes to it, `AudienceView` polls it every 500ms.
-
-## AI API Notes
-- Both routes use `claude-opus-4-5` with multimodal (base64 image) inputs
-- Commentary route returns `{ playerName, commentary }` JSON
-- Judge route returns `{ scores, overallWinner, winnerAnnouncementScript }` JSON
-- Both routes strip markdown code fences before parsing JSON (`cleaned = raw.replace(/```json...`)
-- Players without a `photoBase64` are filtered out before being sent to either API
-
 ## What NOT to Change
-- `app/types.ts` — changing these shapes breaks both API routes and all components
-- The `localStorage` key name `quickbuild_audience` — audience view depends on it exactly
+- `app/types.ts` — changing these shapes breaks the API routes and components that depend on them
 - The `capture="environment"` attribute on file inputs — needed for mobile camera
