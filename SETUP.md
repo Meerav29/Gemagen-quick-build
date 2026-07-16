@@ -20,7 +20,7 @@ npm install
 
 ## 3. Get a Vertex AI key
 
-The app calls the Vertex AI REST API directly (Gemini 2.5 Flash) for commentary, judging, and text-to-speech. You'll need a `VERTEX_API_KEY` with access to the Vertex AI Generative Language API.
+The app calls the Vertex AI REST API directly (Gemini 2.5 Flash) for commentary, judging, and text-to-speech. You'll need a `VERTEX_API_KEY` with access to Vertex AI (`aiplatform.googleapis.com`) — not the separate Google AI Studio / Gemini API product.
 
 ## 4. Configure environment variables
 
