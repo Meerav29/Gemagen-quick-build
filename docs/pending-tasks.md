@@ -70,10 +70,10 @@ Medal emojis (🥇🥈🥉) are the only remaining emojis post-redesign. Replace
 
 ### Deployment
 - [ ] Rotate leaked credentials (`.env.example` was committed to git with real keys — regenerate Vertex API key + Supabase anon key)
-- [ ] Strip real values from `.env.example`, replace with placeholders
+- [x] Strip real values from `.env.example`, replace with placeholders
 - [ ] Push repo to GitHub, connect to Vercel, add env vars in Vercel dashboard
 - [ ] Add Vercel domain to Supabase allowed origins (Authentication → URL Configuration)
-- [ ] Add `README.md` with local setup and deploy instructions
+- [x] Add `README.md` with local setup and deploy instructions — see [README.md](../README.md) and [SETUP.md](../SETUP.md)
 
 ### Accessibility
 - [ ] Visible focus outlines on all interactive elements
