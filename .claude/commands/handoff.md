@@ -1,5 +1,5 @@
 ---
-description: Verify your local environment is set up correctly and see current known issues before starting work on Quick Build.
+description: Verify your local environment is set up correctly and see current known issues before starting work on Quick Build. (A plain-Node equivalent that doesn't require Claude Code is available via `npm run handoff` — keep both in sync if you change this file.)
 ---
 
 Run through this checklist and report the results clearly, in order. Don't skip a step because an earlier one failed — report every step's status, then summarize.

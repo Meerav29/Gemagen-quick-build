@@ -2,6 +2,8 @@
 
 Full local setup and deploy steps for Quick Build. For what the app does and its tech stack, see [README.md](README.md). For architecture details, see [docs/system-architecture.md](docs/system-architecture.md).
 
+**Taking ownership of this repo for your own team/department** (forking, new accounts, new API keys) rather than developing against the existing repo? Use [HANDOVER.md](HANDOVER.md) instead — it covers everything below plus the account-creation steps.
+
 ## 1. Clone and install
 
 ```bash
@@ -41,7 +43,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) for the host view, and `/audience` in a second tab for the projector view.
 
-New to the repo? Run the `/handoff` slash command (in Claude Code) to verify all of the above is wired up correctly and see current known issues before you start.
+New to the repo? Run `npm run handoff` (or the `/handoff` slash command in Claude Code) to verify all of the above is wired up correctly and see current known issues before you start.
 
 ## 6. Deploy to Vercel
 

@@ -69,11 +69,12 @@ Medal emojis (🥇🥈🥉) are the only remaining emojis post-redesign. Replace
 - [ ] "Skip" button to jump to scores
 
 ### Deployment
-- [ ] Rotate leaked credentials (`.env.example` was committed to git with real keys — regenerate Vertex API key + Supabase anon key)
-- [x] Strip real values from `.env.example`, replace with placeholders
-- [ ] Push repo to GitHub, connect to Vercel, add env vars in Vercel dashboard
-- [ ] Add Vercel domain to Supabase allowed origins (Authentication → URL Configuration)
+- [x] Strip real values from `.env.example`, replace with placeholders — confirmed via full git history audit that `.env.example` never had real values committed (only placeholder-style values across all commits, local and remote)
+- [x] Push repo to GitHub, connect to Vercel, add env vars in Vercel dashboard — live at gemagen-quick-build.vercel.app
+- [ ] Add Vercel domain to Supabase allowed origins (Authentication → URL Configuration) — unconfirmed, verify
 - [x] Add `README.md` with local setup and deploy instructions — see [README.md](../README.md) and [SETUP.md](../SETUP.md)
+
+Note for new ownership: the current Vertex API key and Supabase anon key belong to the original developer's accounts. Rather than rotating them in place, the new team provisions its own Vertex AI and Supabase projects as part of the handover — see [HANDOVER.md](../HANDOVER.md). The old values stop mattering once the new team's env vars point at their own projects.
 
 ### Accessibility
 - [ ] Visible focus outlines on all interactive elements

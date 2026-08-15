@@ -33,7 +33,9 @@ Inspired by Google's "AI Quick Build Experience" demo — built for classroom + 
 
 See [SETUP.md](SETUP.md) for full local setup and deploy instructions.
 
-New to this repo? Run the `/handoff` slash command in Claude Code to verify your environment and see current known issues.
+New to this repo? Run `npm run handoff` (or the `/handoff` slash command in Claude Code) to verify your environment and see current known issues.
+
+**Taking ownership of this repo for your own team/department?** See [HANDOVER.md](HANDOVER.md) for the full fork → accounts → deploy walkthrough.
 
 ---
 
